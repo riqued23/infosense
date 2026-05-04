@@ -25,7 +25,6 @@ function openAiLabSummaryApi(apiKey: string | undefined, model: string) {
         await handleLabSummaryRequest(req, res, { apiKey, model })
       })
     },
-<<<<<<< HEAD
   }
 }
 
@@ -36,26 +35,21 @@ export default defineConfig(({ mode }) => {
     plugins: [
       openAiLabSummaryApi(env.OPENAI_API_KEY, env.OPENAI_MODEL || 'gpt-4.1-mini'),
       figmaAssetResolver(),
-      // The React and Tailwind plugins are both required for Make, even if
-      // Tailwind is not being actively used – do not remove them
       react(),
       tailwindcss(),
     ],
+    server: {
+      proxy: {
+        '/api/translate': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src/app'),
       },
     },
   }
-=======
-  },
-  server: {
-    proxy: {
-      '/api/translate': {
-        target: 'http://localhost:3000',
-        changeOrigin: true,
-      },
-    },
-  },
->>>>>>> 6ea11a1 (translation service)
 })

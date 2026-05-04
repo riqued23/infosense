@@ -3,7 +3,6 @@ import { requestAiLabSummary, type GeneratedSummary } from '../lib/aiSummary';
 import { useMemo, useState, useEffect } from 'react';
 // @ts-ignore
 import { useTranslation } from '../translation/useTranslation';
-
 type LabResultStatus = 'normal' | 'high' | 'low';
 
 interface LabResult {
@@ -27,6 +26,30 @@ interface AISummaryPanelProps {
   results: LabResult[];
   questionsToAsk: string[];
 }
+
+const UI_LABELS = {
+  panelTitle: 'AI Lab Summary',
+  statusLocalPreview: 'Local preview',
+  statusGenerating: 'Generating...',
+  statusAiGenerated: 'OpenAI-generated',
+  statusLocalFallback: 'Local fallback',
+  btnGenerating: 'Generating',
+  btnRegenerate: 'Regenerate',
+  btnGenerate: 'Generate AI',
+  inRange: 'In Range',
+  ofReviewed: 'of',
+  reviewedResults: 'reviewed results',
+  needsReview: 'Needs Review',
+  outsideRange: 'Outside reference range',
+  clinicalContext: 'Clinical Context',
+  bringToTeam: 'Bring this report to your care team for full interpretation.',
+  keyTakeaways: 'Key Takeaways',
+  watchItems: 'Watch Items',
+  questionsHeader: 'Questions to Ask Your Doctor',
+  localPreviewNotice: 'This is a local preview. Press Generate AI to send the reviewed lab values to OpenAI for a plain-language summary.',
+  aiUnavailablePrefix: 'AI summary unavailable:',
+  aiUnavailableSuffix: 'Showing the local rule-based summary instead.',
+};
 
 const formatValue = (result: LabResult) => `${result.value.toLocaleString('en-US')} ${result.unit}`;
 
@@ -102,7 +125,10 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
   const [aiSummary, setAiSummary] = useState<GeneratedSummary | null>(null);
   const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'ready' | 'fallback'>('idle');
   const [aiError, setAiError] = useState('');
-  const { language, translateBatch } = useTranslation();
+  const { language, translateBatch } = useTranslation() as {
+    language: string;
+    translateBatch: (texts: string[]) => Promise<string[]>;
+  };
   const localSummary = useMemo(
     () => generateSummary(report, results, questionsToAsk, summaryVersion),
     [questionsToAsk, report, results, summaryVersion]
@@ -193,13 +219,13 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
             </div>
             <div>
               <p className="text-sm text-blue-100 mb-1">
-                AI Lab Summary
-                {aiStatus === 'idle' && <span className="ml-2 text-blue-200">Local preview</span>}
-                {aiStatus === 'loading' && <span className="ml-2 text-blue-200">Generating...</span>}
-                {aiStatus === 'ready' && <span className="ml-2 text-green-100">OpenAI-generated</span>}
-                {aiStatus === 'fallback' && <span className="ml-2 text-orange-100">Local fallback</span>}
+                {labels.panelTitle}
+                {aiStatus === 'idle' && <span className="ml-2 text-blue-200">{labels.statusLocalPreview}</span>}
+                {aiStatus === 'loading' && <span className="ml-2 text-blue-200">{labels.statusGenerating}</span>}
+                {aiStatus === 'ready' && <span className="ml-2 text-green-100">{labels.statusAiGenerated}</span>}
+                {aiStatus === 'fallback' && <span className="ml-2 text-orange-100">{labels.statusLocalFallback}</span>}
               </p>
-              <h2 className="text-xl leading-snug">{summary.headline}</h2>
+              <h2 className="text-xl leading-snug">{displaySummary.headline}</h2>
             </div>
           </div>
           <button
@@ -209,7 +235,7 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
             className="inline-flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 disabled:opacity-70 text-white px-4 py-2 rounded-lg transition-colors text-sm"
           >
             <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
-            {isGenerating ? 'Generating' : aiStatus === 'ready' ? 'Regenerate' : 'Generate AI'}
+            {isGenerating ? labels.btnGenerating : aiStatus === 'ready' ? labels.btnRegenerate : labels.btnGenerate}
           </button>
         </div>
       </div>
@@ -219,13 +245,13 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
 
         {aiStatus === 'idle' && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
-            This is a local preview. Press Generate AI to send the reviewed lab values to OpenAI for a plain-language summary.
+            {labels.localPreviewNotice}
           </div>
         )}
 
         {aiStatus === 'fallback' && aiError && (
           <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-xs text-orange-800">
-            AI summary unavailable: {aiError} Showing the local rule-based summary instead.
+            {labels.aiUnavailablePrefix} {aiError} {labels.aiUnavailableSuffix}
           </div>
         )}
 

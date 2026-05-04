@@ -39,6 +39,7 @@ export function ComprehensiveSummary({ data }: ComprehensiveSummaryProps) {
   const { language, translateBatch } = useTranslation();
 
   const [labels, setLabels] = useState(COMP_DEFAULTS);
+  const [translatedReportType, setTranslatedReportType] = useState(data.reportType);
   const [translatedFindings, setTranslatedFindings] = useState<string[]>(data.keyFindings);
   const [translatedActions, setTranslatedActions] = useState<string[]>(data.criticalActions);
   const [translatedSteps, setTranslatedSteps] = useState<string[]>(data.nextSteps);
@@ -46,6 +47,7 @@ export function ComprehensiveSummary({ data }: ComprehensiveSummaryProps) {
   useEffect(() => {
     if (language === 'en') {
       setLabels(COMP_DEFAULTS);
+      setTranslatedReportType(data.reportType);
       setTranslatedFindings(data.keyFindings);
       setTranslatedActions(data.criticalActions);
       setTranslatedSteps(data.nextSteps);
@@ -53,13 +55,14 @@ export function ComprehensiveSummary({ data }: ComprehensiveSummaryProps) {
     }
 
     const staticStrings = Object.values(COMP_DEFAULTS);
-    const dynamicStrings = [...data.keyFindings, ...data.criticalActions, ...data.nextSteps];
+    const dynamicStrings = [data.reportType, ...data.keyFindings, ...data.criticalActions, ...data.nextSteps];
 
     translateBatch([...staticStrings, ...dynamicStrings]).then((translated: string[]) => {
       const labelKeys = Object.keys(COMP_DEFAULTS) as (keyof typeof COMP_DEFAULTS)[];
       setLabels(Object.fromEntries(labelKeys.map((k, i) => [k, translated[i]])) as typeof COMP_DEFAULTS);
 
       let i = staticStrings.length;
+      setTranslatedReportType(translated[i++]);
       setTranslatedFindings(data.keyFindings.map(() => translated[i++]));
       setTranslatedActions(data.criticalActions.map(() => translated[i++]));
       setTranslatedSteps(data.nextSteps.map(() => translated[i++]));
@@ -114,7 +117,7 @@ export function ComprehensiveSummary({ data }: ComprehensiveSummaryProps) {
               <FileText className="w-4 h-4" />
               <p className="text-sm text-blue-100">{labels.reportType}</p>
             </div>
-            <p className="text-lg">{data.reportType}</p>
+            <p className="text-lg">{translatedReportType}</p>
           </div>
         </div>
       </div>
@@ -123,7 +126,7 @@ export function ComprehensiveSummary({ data }: ComprehensiveSummaryProps) {
         {/* Introductory Summary */}
         <div className="pb-4 border-b border-gray-200">
           <p className="text-gray-700 leading-relaxed">
-            {data.reportType} {labels.introText}
+            {translatedReportType} {labels.introText}
           </p>
         </div>
 
