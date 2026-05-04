@@ -199,7 +199,7 @@ function detectReferenceRange(line: string, definition: LabDefinition, value: nu
   };
 }
 
-function getStatus(value: number, normalMin: number, normalMax: number): LabStatus {
+export function getLabStatus(value: number, normalMin: number, normalMax: number): LabStatus {
   if (value < normalMin) return 'low';
   if (value > normalMax) return 'high';
   return 'normal';
@@ -230,7 +230,7 @@ function findResultForDefinition(text: string, definition: LabDefinition): Parse
     }
 
     const { normalMin, normalMax, source, note } = detectReferenceRange(line, definition, value);
-    const status = getStatus(value, normalMin, normalMax);
+    const status = getLabStatus(value, normalMin, normalMax);
     const unit = detectUnit(line, definition.unit);
 
     return {
@@ -337,6 +337,56 @@ function getParserConfidence(results: ParsedLabResult[], warnings: string[]) {
   }
 
   return 'low' as const;
+}
+
+export function refreshParsedLabResult(result: ParsedLabResult): ParsedLabResult {
+  const value = Number.isFinite(result.value) ? result.value : 0;
+  const normalMin = Number.isFinite(result.normalMin) ? result.normalMin : 0;
+  const normalMax = Number.isFinite(result.normalMax) ? result.normalMax : normalMin;
+  const rangeMin = Math.min(result.rangeMin, normalMin, value);
+  const rangeMax = Math.max(result.rangeMax, normalMax, value);
+
+  return {
+    ...result,
+    value,
+    normalMin,
+    normalMax,
+    rangeMin,
+    rangeMax,
+    status: getLabStatus(value, normalMin, normalMax),
+    trends: result.trends.length > 0 ? [{ ...result.trends[0], value }] : [{ date: new Date().toISOString().slice(0, 10), value }],
+  };
+}
+
+export function refreshParsedLabReport(report: ParsedLabReport): ParsedLabReport {
+  const results = report.results.map(refreshParsedLabResult);
+  const abnormalResults = results.filter((result) => result.status !== 'normal');
+  const parserWarnings = [...report.parserWarnings.filter((warning) => !warning.includes('reference range'))];
+  const fallbackRangeCount = results.filter((result) => result.referenceRangeSource === 'general-fallback').length;
+
+  if (fallbackRangeCount > 0) {
+    parserWarnings.push(`${fallbackRangeCount} reference range${fallbackRangeCount === 1 ? ' was' : 's were'} not found in the PDF, so general fallback ranges are being shown.`);
+  }
+
+  return {
+    ...report,
+    results,
+    questionsToAsk: buildQuestions(results),
+    keyFindings:
+      results.length > 0
+        ? [
+            `${results.length} supported lab value${results.length === 1 ? '' : 's'} were reviewed from the uploaded PDF.`,
+            `${abnormalResults.length} result${abnormalResults.length === 1 ? '' : 's'} are outside the selected reference range.`,
+            'Review extracted values against the original PDF before relying on this summary.',
+          ]
+        : ['No structured lab values were recognized from the uploaded PDF.'],
+    criticalActions:
+      abnormalResults.length > 0
+        ? abnormalResults.map((result) => `Discuss your ${result.status} ${result.name} result with your doctor.`)
+        : ['Ask your clinician to review the uploaded report if anything looks unclear or incomplete.'],
+    parserWarnings,
+    parserConfidence: getParserConfidence(results, parserWarnings),
+  };
 }
 
 export function parseLabReportText(extractedText: string, fileName?: string): ParsedLabReport {

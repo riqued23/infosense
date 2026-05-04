@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardList, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
+import { requestAiLabSummary, type GeneratedSummary } from '@/lib/aiSummary';
 
 type LabResultStatus = 'normal' | 'high' | 'low';
 
@@ -23,15 +24,6 @@ interface AISummaryPanelProps {
   report: ReportSummaryData;
   results: LabResult[];
   questionsToAsk: string[];
-}
-
-interface GeneratedSummary {
-  headline: string;
-  plainLanguageSummary: string;
-  keyTakeaways: string[];
-  watchItems: string[];
-  suggestedQuestions: string[];
-  confidenceNote: string;
 }
 
 const formatValue = (result: LabResult) => `${result.value.toLocaleString('en-US')} ${result.unit}`;
@@ -105,18 +97,39 @@ function generateSummary(report: ReportSummaryData, results: LabResult[], questi
 export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPanelProps) {
   const [summaryVersion, setSummaryVersion] = useState(1);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [aiSummary, setAiSummary] = useState<GeneratedSummary | null>(null);
+  const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'ready' | 'fallback'>('idle');
+  const [aiError, setAiError] = useState('');
 
-  const summary = useMemo(
+  const localSummary = useMemo(
     () => generateSummary(report, results, questionsToAsk, summaryVersion),
     [questionsToAsk, report, results, summaryVersion]
   );
+  const summary = aiSummary ?? localSummary;
+
+  const loadAiSummary = async () => {
+    setIsGenerating(true);
+    setAiStatus('loading');
+    setAiError('');
+    setAiSummary(null);
+
+    try {
+      const nextSummary = await requestAiLabSummary(report, results, questionsToAsk);
+
+      setAiSummary(nextSummary);
+      setAiStatus('ready');
+    } catch (error) {
+      setAiSummary(null);
+      setAiStatus('fallback');
+      setAiError(error instanceof Error ? error.message : 'AI summary unavailable.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const handleRegenerate = () => {
-    setIsGenerating(true);
-    window.setTimeout(() => {
-      setSummaryVersion((version) => version + 1);
-      setIsGenerating(false);
-    }, 700);
+    setSummaryVersion((version) => version + 1);
+    loadAiSummary();
   };
 
   return (
@@ -128,24 +141,42 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-sm text-blue-100 mb-1">AI Lab Summary</p>
+              <p className="text-sm text-blue-100 mb-1">
+                AI Lab Summary
+                {aiStatus === 'idle' && <span className="ml-2 text-blue-200">Local preview</span>}
+                {aiStatus === 'loading' && <span className="ml-2 text-blue-200">Generating...</span>}
+                {aiStatus === 'ready' && <span className="ml-2 text-green-100">OpenAI-generated</span>}
+                {aiStatus === 'fallback' && <span className="ml-2 text-orange-100">Local fallback</span>}
+              </p>
               <h2 className="text-xl leading-snug">{summary.headline}</h2>
             </div>
           </div>
           <button
             type="button"
-            onClick={handleRegenerate}
+            onClick={aiStatus === 'ready' ? handleRegenerate : loadAiSummary}
             disabled={isGenerating}
             className="inline-flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 disabled:opacity-70 text-white px-4 py-2 rounded-lg transition-colors text-sm"
           >
             <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
-            {isGenerating ? 'Generating' : 'Regenerate'}
+            {isGenerating ? 'Generating' : aiStatus === 'ready' ? 'Regenerate' : 'Generate AI'}
           </button>
         </div>
       </div>
 
       <div className="p-6 space-y-5">
         <p className="text-gray-700 leading-relaxed">{summary.plainLanguageSummary}</p>
+
+        {aiStatus === 'idle' && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
+            This is a local preview. Press Generate AI to send the reviewed lab values to OpenAI for a plain-language summary.
+          </div>
+        )}
+
+        {aiStatus === 'fallback' && aiError && (
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-xs text-orange-800">
+            AI summary unavailable: {aiError} Showing the local rule-based summary instead.
+          </div>
+        )}
 
         <div className="grid md:grid-cols-3 gap-3">
           <div className="border border-green-200 bg-green-50 rounded-lg p-4">

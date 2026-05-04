@@ -53,7 +53,7 @@ export function Home() {
       const extractedText = await extractPdfText(uploadedFile);
       const parsedReport = parseLabReportText(extractedText, uploadedFile.name);
       sessionStorage.setItem('clearcareUploadedReport', JSON.stringify(parsedReport));
-      navigate('/results', { state: { source: 'uploaded-pdf' } });
+      navigate('/review', { state: { source: 'uploaded-pdf' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to read this PDF.';
       setUploadError(`${message} Try a text-based PDF or export the report as a searchable PDF.`);
