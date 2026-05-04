@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardList, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
-import { requestAiLabSummary, type GeneratedSummary } from '@/lib/aiSummary';
+import { requestAiLabSummary, type GeneratedSummary } from '../lib/aiSummary';
+import { useMemo, useState, useEffect } from 'react';
+// @ts-ignore
+import { useTranslation } from '../translation/useTranslation';
 
 type LabResultStatus = 'normal' | 'high' | 'low';
 
@@ -100,7 +102,7 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
   const [aiSummary, setAiSummary] = useState<GeneratedSummary | null>(null);
   const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'ready' | 'fallback'>('idle');
   const [aiError, setAiError] = useState('');
-
+  const { language, translateBatch } = useTranslation();
   const localSummary = useMemo(
     () => generateSummary(report, results, questionsToAsk, summaryVersion),
     [questionsToAsk, report, results, summaryVersion]
@@ -126,6 +128,55 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
       setIsGenerating(false);
     }
   };
+
+  const [labels, setLabels] = useState(UI_LABELS);
+  const [translatedSummary, setTranslatedSummary] = useState<GeneratedSummary | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  useEffect(() => {
+    if (language === 'en') {
+      setLabels(UI_LABELS);
+      setTranslatedSummary(null);
+      return;
+    }
+
+    setIsTranslating(true);
+
+    const labelValues = Object.values(UI_LABELS);
+    const summaryStrings = [
+      summary.headline,
+      summary.plainLanguageSummary,
+      ...summary.keyTakeaways,
+      ...summary.watchItems,
+      ...summary.suggestedQuestions,
+      summary.confidenceNote,
+    ];
+
+    translateBatch([...labelValues, ...summaryStrings])
+      .then((translated: string[]) => {
+        const labelKeys = Object.keys(UI_LABELS) as (keyof typeof UI_LABELS)[];
+        const translatedLabels = Object.fromEntries(
+          labelKeys.map((k, i) => [k, translated[i]])
+        ) as typeof UI_LABELS;
+
+        let i = labelValues.length;
+        const ts: GeneratedSummary = {
+          headline: translated[i++],
+          plainLanguageSummary: translated[i++],
+          keyTakeaways: summary.keyTakeaways.map(() => translated[i++]),
+          watchItems: summary.watchItems.map(() => translated[i++]),
+          suggestedQuestions: summary.suggestedQuestions.map(() => translated[i++]),
+          confidenceNote: translated[i++],
+        };
+
+        setLabels(translatedLabels);
+        setTranslatedSummary(ts);
+        setIsTranslating(false);
+      })
+      .catch(() => setIsTranslating(false));
+  }, [language, summary]);
+
+  const displaySummary = translatedSummary ?? summary;
 
   const handleRegenerate = () => {
     setSummaryVersion((version) => version + 1);
@@ -154,7 +205,7 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
           <button
             type="button"
             onClick={aiStatus === 'ready' ? handleRegenerate : loadAiSummary}
-            disabled={isGenerating}
+            disabled={isGenerating || isTranslating}
             className="inline-flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 disabled:opacity-70 text-white px-4 py-2 rounded-lg transition-colors text-sm"
           >
             <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
@@ -164,7 +215,7 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
       </div>
 
       <div className="p-6 space-y-5">
-        <p className="text-gray-700 leading-relaxed">{summary.plainLanguageSummary}</p>
+        <p className="text-gray-700 leading-relaxed">{displaySummary.plainLanguageSummary}</p>
 
         {aiStatus === 'idle' && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
@@ -182,27 +233,27 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
           <div className="border border-green-200 bg-green-50 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2 text-green-800">
               <CheckCircle2 className="w-5 h-5" />
-              <h3 className="text-sm">In Range</h3>
+              <h3 className="text-sm">{labels.inRange}</h3>
             </div>
             <p className="text-2xl text-green-900">{results.filter((result) => result.status === 'normal').length}</p>
-            <p className="text-xs text-green-800">of {results.length} reviewed results</p>
+            <p className="text-xs text-green-800">{labels.ofReviewed} {results.length} {labels.reviewedResults}</p>
           </div>
 
           <div className="border border-orange-200 bg-orange-50 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2 text-orange-800">
               <AlertTriangle className="w-5 h-5" />
-              <h3 className="text-sm">Needs Review</h3>
+              <h3 className="text-sm">{labels.needsReview}</h3>
             </div>
             <p className="text-2xl text-orange-900">{results.filter((result) => result.status !== 'normal').length}</p>
-            <p className="text-xs text-orange-800">outside reference range</p>
+            <p className="text-xs text-orange-800">{labels.outsideRange}</p>
           </div>
 
           <div className="border border-blue-200 bg-blue-50 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2 text-blue-800">
               <ShieldCheck className="w-5 h-5" />
-              <h3 className="text-sm">Clinical Context</h3>
+              <h3 className="text-sm">{labels.clinicalContext}</h3>
             </div>
-            <p className="text-sm text-blue-900 leading-snug">Bring this summary to your care team for interpretation.</p>
+            <p className="text-sm text-blue-900 leading-snug">{labels.bringToTeam}</p>
           </div>
         </div>
 
@@ -210,10 +261,10 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
           <div>
             <div className="flex items-center gap-2 mb-3">
               <ClipboardList className="w-5 h-5 text-blue-700" />
-              <h3 className="text-gray-900">Key Takeaways</h3>
+              <h3 className="text-gray-900">{labels.keyTakeaways}</h3>
             </div>
             <ul className="space-y-2">
-              {summary.keyTakeaways.map((takeaway, index) => (
+              {displaySummary.keyTakeaways.map((takeaway, index) => (
                 <li key={index} className="flex gap-2 text-sm text-gray-700">
                   <span className="text-blue-600 flex-shrink-0">•</span>
                   <span>{takeaway}</span>
@@ -225,10 +276,10 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
           <div>
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle className="w-5 h-5 text-orange-700" />
-              <h3 className="text-gray-900">Watch Items</h3>
+              <h3 className="text-gray-900">{labels.watchItems}</h3>
             </div>
             <ul className="space-y-2">
-              {summary.watchItems.map((item, index) => (
+              {displaySummary.watchItems.map((item, index) => (
                 <li key={index} className="flex gap-2 text-sm text-gray-700">
                   <span className="text-orange-600 flex-shrink-0">•</span>
                   <span>{item}</span>
@@ -239,9 +290,9 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
         </div>
 
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <h3 className="text-gray-900 mb-3">Questions This Summary Suggests</h3>
+          <h3 className="text-gray-900 mb-3">{labels.questionsHeader}</h3>
           <ul className="space-y-2">
-            {summary.suggestedQuestions.map((question, index) => (
+            {displaySummary.suggestedQuestions.map((question, index) => (
               <li key={index} className="text-sm text-gray-700">
                 {index + 1}. {question}
               </li>
@@ -250,7 +301,7 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
         </div>
 
         <div className="text-xs text-gray-500 border-t border-gray-200 pt-4">
-          {summary.confidenceNote}
+          {displaySummary.confidenceNote}
         </div>
       </div>
     </section>

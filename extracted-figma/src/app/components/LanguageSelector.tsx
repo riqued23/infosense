@@ -1,29 +1,33 @@
 import { useState } from 'react';
 import { Languages, ChevronDown, Globe } from 'lucide-react';
-
-interface LanguageSelectorProps {
-  selectedLanguage: string;
-  onLanguageChange: (language: string) => void;
-}
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore – JS module, types inferred as any
+import { useTranslation } from '../translation/useTranslation';
 
 const LANGUAGES = [
-  { id: 'english', label: 'English', nativeLabel: 'English', flag: '🇬🇧' },
-  { id: 'chinese', label: 'Chinese', nativeLabel: '中文', flag: '🇨🇳' },
-  { id: 'spanish', label: 'Spanish', nativeLabel: 'Español', flag: '🇪🇸' },
-  { id: 'arabic', label: 'Arabic', nativeLabel: 'العربية', flag: '🇸🇦' },
-  { id: 'french', label: 'French', nativeLabel: 'Français', flag: '🇫🇷' },
-  { id: 'hindi', label: 'Hindi', nativeLabel: 'हिन्दी', flag: '🇮🇳' }
+  { code: 'en', label: 'English', nativeLabel: 'English', flag: '🇬🇧' },
+  { code: 'zh', label: 'Chinese', nativeLabel: '中文', flag: '🇨🇳' },
+  { code: 'es', label: 'Spanish', nativeLabel: 'Español', flag: '🇪🇸' },
+  { code: 'ar', label: 'Arabic', nativeLabel: 'العربية', flag: '🇸🇦' },
+  { code: 'fr', label: 'French', nativeLabel: 'Français', flag: '🇫🇷' },
+  { code: 'hi', label: 'Hindi', nativeLabel: 'हिन्दी', flag: '🇮🇳' },
+  { code: 'de', label: 'German', nativeLabel: 'Deutsch', flag: '🇩🇪' },
+  { code: 'ja', label: 'Japanese', nativeLabel: '日本語', flag: '🇯🇵' },
+  { code: 'ko', label: 'Korean', nativeLabel: '한국어', flag: '🇰🇷' },
+  { code: 'pt', label: 'Portuguese', nativeLabel: 'Português', flag: '🇧🇷' },
 ];
 
-export function LanguageSelector({ selectedLanguage, onLanguageChange }: LanguageSelectorProps) {
+export function LanguageSelector() {
+  const { language, changeLanguage } = useTranslation();
   const [isMinimized, setIsMinimized] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
 
-  const activeLanguage = LANGUAGES.find((lang) => lang.id === selectedLanguage) || LANGUAGES[0];
+  const activeLanguage = LANGUAGES.find((lang) => lang.code === language) || LANGUAGES[0];
+  const isEnglish = language === 'en';
 
   return (
     <div className="fixed bottom-5 left-5 z-[9999] flex flex-col items-start gap-2 select-none">
-      
+
       {/* Expanded panel */}
       {!isMinimized && (
         <div className="bg-white border border-gray-200 rounded-xl shadow-xl w-80 overflow-hidden">
@@ -44,23 +48,23 @@ export function LanguageSelector({ selectedLanguage, onLanguageChange }: Languag
 
           {/* Active language banner */}
           <div className={`px-4 py-2.5 flex items-center justify-between border-b border-gray-100 ${
-            selectedLanguage === 'english' ? 'bg-gray-50' : 'bg-blue-50'
+            isEnglish ? 'bg-gray-50' : 'bg-blue-50'
           }`}>
             <div>
               <p className="text-xs text-gray-500 mb-0.5">Current Language</p>
-              <p className={`text-sm ${selectedLanguage === 'english' ? 'text-gray-700' : 'text-blue-700'}`}>
+              <p className={`text-sm ${isEnglish ? 'text-gray-700' : 'text-blue-700'}`}>
                 <span className="mr-2">{activeLanguage.flag}</span>
                 {activeLanguage.nativeLabel}
               </p>
             </div>
-            {selectedLanguage !== 'english' && (
+            {!isEnglish && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
                 Active
               </span>
             )}
           </div>
 
-          {/* Language selector */}
+          {/* Language selector dropdown */}
           <div className="px-4 py-3 border-b border-gray-100">
             <div className="relative">
               <button
@@ -78,25 +82,25 @@ export function LanguageSelector({ selectedLanguage, onLanguageChange }: Languag
                 <div className="absolute bottom-full mb-1 left-0 right-0 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden z-10 max-h-64 overflow-y-auto">
                   {LANGUAGES.map((lang) => (
                     <button
-                      key={lang.id}
+                      key={lang.code}
                       onClick={() => {
-                        onLanguageChange(lang.id);
+                        changeLanguage(lang.code);
                         setIsOpen(false);
                       }}
                       className={`w-full text-left px-3 py-2.5 flex items-center justify-between hover:bg-gray-50 transition-colors ${
-                        selectedLanguage === lang.id ? 'bg-blue-50' : ''
+                        language === lang.code ? 'bg-blue-50' : ''
                       }`}
                     >
                       <div className="flex items-center gap-2">
                         <span className="text-lg">{lang.flag}</span>
                         <div>
-                          <p className={`text-sm ${selectedLanguage === lang.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                          <p className={`text-sm ${language === lang.code ? 'text-blue-700' : 'text-gray-800'}`}>
                             {lang.nativeLabel}
                           </p>
                           <p className="text-xs text-gray-500">{lang.label}</p>
                         </div>
                       </div>
-                      {selectedLanguage === lang.id && (
+                      {language === lang.code && (
                         <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
                       )}
                     </button>
@@ -105,25 +109,24 @@ export function LanguageSelector({ selectedLanguage, onLanguageChange }: Languag
               )}
             </div>
 
-            {/* Description */}
             <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg p-2.5">
               <p className="text-xs text-gray-600">
-                {selectedLanguage === 'english' 
-                  ? 'Select a language to translate the medical explanation into your preferred language.'
-                  : 'Medical explanations will be displayed in both English and your selected language.'}
+                {isEnglish
+                  ? 'Select a language to translate the entire page and medical summary.'
+                  : 'The page and AI summary are being displayed in your selected language.'}
               </p>
             </div>
           </div>
 
-          {/* Quick-switch strip */}
-          <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+          {/* Quick-switch flag strip */}
+          <div className="px-4 pb-3 pt-2 flex flex-wrap gap-1.5">
             {LANGUAGES.map((lang) => (
               <button
-                key={lang.id}
-                onClick={() => onLanguageChange(lang.id)}
+                key={lang.code}
+                onClick={() => changeLanguage(lang.code)}
                 title={lang.label}
                 className={`text-xs px-2 py-1 rounded-md border transition-colors ${
-                  selectedLanguage === lang.id
+                  language === lang.code
                     ? 'bg-blue-600 text-white border-blue-600'
                     : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
                 }`}
@@ -140,7 +143,7 @@ export function LanguageSelector({ selectedLanguage, onLanguageChange }: Languag
         <button
           onClick={() => setIsMinimized(false)}
           className={`flex items-center gap-2 px-3 py-2.5 rounded-xl shadow-lg border transition-all ${
-            selectedLanguage !== 'english'
+            !isEnglish
               ? 'bg-blue-600 border-blue-700 text-white'
               : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
           }`}
@@ -148,7 +151,7 @@ export function LanguageSelector({ selectedLanguage, onLanguageChange }: Languag
         >
           <Languages className="w-4 h-4" />
           <span className="text-xs font-medium">
-            {selectedLanguage !== 'english' ? activeLanguage.flag : 'Language'}
+            {!isEnglish ? activeLanguage.flag : 'Language'}
           </span>
         </button>
       )}

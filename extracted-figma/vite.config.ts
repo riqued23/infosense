@@ -8,7 +8,7 @@ import { handleLabSummaryRequest } from './api/lab-summary.js'
 function figmaAssetResolver() {
   return {
     name: 'figma-asset-resolver',
-    resolveId(id) {
+    resolveId(id: string) {
       if (id.startsWith('figma:asset/')) {
         const filename = id.replace('figma:asset/', '')
         return path.resolve(__dirname, 'src/assets', filename)
@@ -25,6 +25,7 @@ function openAiLabSummaryApi(apiKey: string | undefined, model: string) {
         await handleLabSummaryRequest(req, res, { apiKey, model })
       })
     },
+<<<<<<< HEAD
   }
 }
 
@@ -46,4 +47,15 @@ export default defineConfig(({ mode }) => {
       },
     },
   }
+=======
+  },
+  server: {
+    proxy: {
+      '/api/translate': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
+>>>>>>> 6ea11a1 (translation service)
 })
