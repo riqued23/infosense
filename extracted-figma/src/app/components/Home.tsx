@@ -1,15 +1,20 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Upload, FileText, AlertCircle, CheckCircle } from 'lucide-react';
+import { Upload, FileText, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { extractPdfText } from '@/lib/pdfText';
+import { parseLabReportText } from '@/lib/labReportParser';
 
 export function Home() {
   const navigate = useNavigate();
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isReadingReport, setIsReadingReport] = useState(false);
+  const [uploadError, setUploadError] = useState('');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setUploadedFile(e.target.files[0]);
+      setUploadError('');
     }
   };
 
@@ -27,11 +32,34 @@ export function Home() {
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       setUploadedFile(e.dataTransfer.files[0]);
+      setUploadError('');
     }
   };
 
-  const handleExplain = () => {
-    navigate('/results');
+  const handleExplain = async () => {
+    if (!uploadedFile) {
+      return;
+    }
+
+    if (uploadedFile.type !== 'application/pdf') {
+      setUploadError('PDF upload is supported first. JPG and PNG will need OCR in a later step.');
+      return;
+    }
+
+    setIsReadingReport(true);
+    setUploadError('');
+
+    try {
+      const extractedText = await extractPdfText(uploadedFile);
+      const parsedReport = parseLabReportText(extractedText, uploadedFile.name);
+      sessionStorage.setItem('clearcareUploadedReport', JSON.stringify(parsedReport));
+      navigate('/results', { state: { source: 'uploaded-pdf' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to read this PDF.';
+      setUploadError(`${message} Try a text-based PDF or export the report as a searchable PDF.`);
+    } finally {
+      setIsReadingReport(false);
+    }
   };
 
   return (
@@ -108,17 +136,28 @@ export function Home() {
               <div className="flex gap-3 justify-center">
                 <button
                   onClick={handleExplain}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                  disabled={isReadingReport}
+                  className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
                 >
-                  Explain This Report
+                  {isReadingReport && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {isReadingReport ? 'Reading PDF' : 'Explain This Report'}
                 </button>
                 <button
-                  onClick={() => setUploadedFile(null)}
+                  onClick={() => {
+                    setUploadedFile(null);
+                    setUploadError('');
+                  }}
+                  disabled={isReadingReport}
                   className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 transition-colors"
                 >
                   Upload Different File
                 </button>
               </div>
+              {uploadError && (
+                <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
+                  {uploadError}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle, TrendingUp, TrendingDown } from 'lucide-react';
+import { CheckCircle, TrendingUp, TrendingDown } from 'lucide-react';
 
 interface ResultIndicatorProps {
   name: string;
@@ -26,32 +26,20 @@ export function ResultIndicator({
     return num.toLocaleString('en-US');
   };
 
-  // Fixed visual positions for consistent appearance across all graphs
-  const normalStartPosition = 30; // Fixed at 30%
-  const normalEndPosition = 70;   // Fixed at 70%
-  const normalWidth = normalEndPosition - normalStartPosition; // 40% width
+  const fullRange = rangeMax - rangeMin;
+  const normalStartPosition = fullRange > 0 ? ((normalMin - rangeMin) / fullRange) * 100 : 30;
+  const normalEndPosition = fullRange > 0 ? ((normalMax - rangeMin) / fullRange) * 100 : 70;
+  const clampedNormalStart = Math.max(0, Math.min(100, normalStartPosition));
+  const clampedNormalEnd = Math.max(clampedNormalStart, Math.min(100, normalEndPosition));
+  const normalWidth = clampedNormalEnd - clampedNormalStart;
 
   // Calculate position of user's value based on where it falls relative to normal range
   let valuePosition: number;
   
-  if (value < normalMin) {
-    // Value is below normal - map to 0-30% zone
-    const belowRange = normalMin - rangeMin;
-    const belowValue = normalMin - value;
-    const belowPercent = belowRange > 0 ? (belowValue / belowRange) : 0;
-    valuePosition = normalStartPosition * (1 - belowPercent);
-  } else if (value > normalMax) {
-    // Value is above normal - map to 70-100% zone
-    const aboveRange = rangeMax - normalMax;
-    const aboveValue = value - normalMax;
-    const abovePercent = aboveRange > 0 ? (aboveValue / aboveRange) : 0;
-    valuePosition = normalEndPosition + ((100 - normalEndPosition) * abovePercent);
+  if (fullRange > 0) {
+    valuePosition = ((value - rangeMin) / fullRange) * 100;
   } else {
-    // Value is within normal range - map to 30-70% zone
-    const normalRange = normalMax - normalMin;
-    const valueInNormal = value - normalMin;
-    const normalPercent = normalRange > 0 ? (valueInNormal / normalRange) : 0.5;
-    valuePosition = normalStartPosition + (normalWidth * normalPercent);
+    valuePosition = 50;
   }
 
   // Clamp position between 0 and 100
@@ -101,19 +89,24 @@ export function ResultIndicator({
       </div>
 
       <div className="relative">
+        <div className="flex items-center justify-between mb-2 text-xs text-gray-600">
+          <span>Display range: {formatNumber(rangeMin)} - {formatNumber(rangeMax)} {unit}</span>
+          <span>Reference range: {formatNumber(normalMin)} - {formatNumber(normalMax)} {unit}</span>
+        </div>
+
         {/* Scale background */}
         <div className="h-10 bg-gray-100 rounded-lg relative overflow-hidden">
           {/* Low zone (left) */}
           <div
             className="absolute top-0 left-0 h-full bg-orange-200"
-            style={{ width: `${normalStartPosition}%` }}
+            style={{ width: `${clampedNormalStart}%` }}
           />
           
           {/* Normal zone (middle) */}
           <div
             className="absolute top-0 h-full bg-green-200"
             style={{ 
-              left: `${normalStartPosition}%`,
+              left: `${clampedNormalStart}%`,
               width: `${normalWidth}%`
             }}
           />
@@ -121,7 +114,7 @@ export function ResultIndicator({
           {/* High zone (right) */}
           <div
             className="absolute top-0 right-0 h-full bg-orange-200"
-            style={{ width: `${100 - normalEndPosition}%` }}
+            style={{ width: `${100 - clampedNormalEnd}%` }}
           />
 
           {/* User value marker */}
@@ -137,15 +130,15 @@ export function ResultIndicator({
         <div className="flex justify-between mt-2 text-xs text-gray-600">
           <div className="flex flex-col items-start">
             <span className="text-orange-600">Low</span>
-            <span className="text-gray-500">&lt; {formatNumber(normalMin)}</span>
+            <span className="text-gray-500">&lt; {formatNumber(normalMin)} {unit}</span>
           </div>
           <div className="flex flex-col items-center">
             <span className="text-green-600">Normal</span>
-            <span className="text-gray-500">{formatNumber(normalMin)} - {formatNumber(normalMax)}</span>
+            <span className="text-gray-500">{formatNumber(normalMin)} - {formatNumber(normalMax)} {unit}</span>
           </div>
           <div className="flex flex-col items-end">
             <span className="text-orange-600">High</span>
-            <span className="text-gray-500">&gt; {formatNumber(normalMax)}</span>
+            <span className="text-gray-500">&gt; {formatNumber(normalMax)} {unit}</span>
           </div>
         </div>
       </div>

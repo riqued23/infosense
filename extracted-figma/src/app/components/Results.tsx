@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { ArrowLeft, FileText, Info, Languages, ChevronDown, Save, MessageCircle, AlertCircle, Image as ImageIcon, MessageSquare, Cloud, HelpCircle, Edit2, Trash2, Plus } from 'lucide-react';
 import { TranslationPanel } from './TranslationPanel';
 import { ResultIndicator } from './ResultIndicator';
@@ -8,6 +8,8 @@ import { TrendAnalysis } from './TrendAnalysis';
 import { MedicalTerm } from './MedicalTerm';
 import { ComprehensiveSummary } from './ComprehensiveSummary';
 import { LanguageSelector } from './LanguageSelector';
+import { AISummaryPanel } from './AISummaryPanel';
+import type { ParsedLabReport } from '@/lib/labReportParser';
 import exampleImage from 'figma:asset/82fbe702169bdbc28b8a30884aa28c6363cb2024.png';
 
 // Mock AI-generated explanation based on real CBC report
@@ -201,11 +203,42 @@ const summaryData = {
 
 export function Results() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const uploadedReport = useMemo<ParsedLabReport | null>(() => {
+    try {
+      const storedReport = sessionStorage.getItem('clearcareUploadedReport');
+      return storedReport ? JSON.parse(storedReport) : null;
+    } catch {
+      return null;
+    }
+  }, [location.key]);
+  const currentExplanation = uploadedReport
+    ? {
+        summary:
+          uploadedReport.results.length > 0
+            ? `${uploadedReport.results.length} lab values were extracted from your uploaded PDF. Review the extracted values against the original report before using this summary.`
+            : 'Your PDF was uploaded, but the app could not recognize structured lab values from the extracted text.',
+        results: uploadedReport.results,
+        questionsToAsk: uploadedReport.questionsToAsk,
+      }
+    : mockExplanation;
+  const currentSummaryData = uploadedReport
+    ? {
+        patientName: uploadedReport.patientName,
+        testDate: uploadedReport.testDate,
+        reportType: uploadedReport.reportType,
+        keyFindings: uploadedReport.keyFindings,
+        abnormalResults: uploadedReport.results.filter((result) => result.status !== 'normal').length,
+        totalResults: Math.max(uploadedReport.results.length, 1),
+        criticalActions: uploadedReport.criticalActions,
+        nextSteps: uploadedReport.nextSteps,
+      }
+    : summaryData;
   const [selectedLanguage, setSelectedLanguage] = useState<string>('english');
   const [showTranslation, setShowTranslation] = useState(false);
   const [showTrends, setShowTrends] = useState(false);
   const [showOriginalReport, setShowOriginalReport] = useState(false);
-  const [questions, setQuestions] = useState<string[]>(mockExplanation.questionsToAsk);
+  const [questions, setQuestions] = useState<string[]>(currentExplanation.questionsToAsk);
   const [newQuestion, setNewQuestion] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState('');
@@ -342,14 +375,63 @@ export function Results() {
           
           {showOriginalReport && (
             <div className="border border-gray-200 rounded-lg overflow-hidden mt-4">
-              <img 
-                src={exampleImage} 
-                alt="Complete Blood Count Report" 
-                className="w-full h-auto"
-              />
+              {uploadedReport ? (
+                <div className="bg-gray-50 p-4">
+                  <div className="text-sm text-gray-700 mb-3">
+                    <strong>File:</strong> {uploadedReport.fileName}
+                  </div>
+                  <pre className="text-xs text-gray-700 whitespace-pre-wrap max-h-96 overflow-auto bg-white border border-gray-200 rounded-lg p-4">
+                    {uploadedReport.extractedText || 'No selectable text was found in this PDF.'}
+                  </pre>
+                </div>
+              ) : (
+                <img 
+                  src={exampleImage} 
+                  alt="Complete Blood Count Report" 
+                  className="w-full h-auto"
+                />
+              )}
             </div>
           )}
         </div>
+
+        {uploadedReport && (
+          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+            <div className="flex items-start gap-3">
+              <FileText className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h2 className="text-gray-900 mb-1">PDF Read Complete</h2>
+                <p className="text-sm text-gray-700">
+                  ClearCare extracted text from {uploadedReport.fileName} and recognized {uploadedReport.results.length} supported lab value{uploadedReport.results.length === 1 ? '' : 's'}.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs border ${
+                    uploadedReport.parserConfidence === 'high'
+                      ? 'bg-green-50 text-green-800 border-green-200'
+                      : uploadedReport.parserConfidence === 'medium'
+                        ? 'bg-blue-50 text-blue-800 border-blue-200'
+                        : 'bg-orange-50 text-orange-800 border-orange-200'
+                  }`}>
+                    Parser confidence: {uploadedReport.parserConfidence}
+                  </span>
+                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs bg-gray-50 text-gray-700 border border-gray-200">
+                    {uploadedReport.results.filter((result) => result.referenceRangeSource === 'uploaded-report').length} ranges from PDF
+                  </span>
+                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs bg-gray-50 text-gray-700 border border-gray-200">
+                    {uploadedReport.results.filter((result) => result.referenceRangeSource === 'general-fallback').length} fallback ranges
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {uploadedReport?.parserWarnings.map((warning, index) => (
+          <div key={index} className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6 flex gap-3">
+            <AlertCircle className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-orange-900">{warning}</div>
+          </div>
+        ))}
 
         {/* AI Explanation Notice */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex gap-3">
@@ -361,19 +443,36 @@ export function Results() {
           </div>
         </div>
 
+        {/* AI Summary */}
+        <div className="mb-6">
+          <AISummaryPanel
+            report={currentSummaryData}
+            results={currentExplanation.results}
+            questionsToAsk={questions}
+          />
+        </div>
+
         {/* Comprehensive Summary */}
         <div className="mb-6">
-          <ComprehensiveSummary data={summaryData} />
+          <ComprehensiveSummary data={currentSummaryData} />
         </div>
 
         {/* Translation Panel */}
-        {showTranslation && (
-          <TranslationPanel language={selectedLanguage} explanation={mockExplanation} />
+        {showTranslation && !uploadedReport && (
+          <TranslationPanel language={selectedLanguage} explanation={currentExplanation} />
         )}
 
         {/* Detailed Results */}
         <div className="space-y-4 mb-8">
-          {mockExplanation.results.map((result, index) => (
+          {currentExplanation.results.length === 0 && (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg text-gray-900 mb-2">No Structured Results Found</h3>
+              <p className="text-sm text-gray-700 leading-relaxed">
+                The PDF text was captured, but this prototype could not identify supported lab values yet. You can view the extracted text above, or try a searchable CBC report with values such as hemoglobin, WBC, platelets, lymphocytes, neutrophils, or MCV.
+              </p>
+            </div>
+          )}
+          {currentExplanation.results.map((result, index) => (
             <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg text-gray-900 mb-4">{result.name}</h3>
               
@@ -390,6 +489,18 @@ export function Results() {
               
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <div className="text-gray-600 text-sm leading-relaxed mb-4">{renderTextWithTerms(result.explanation, result.terms)}</div>
+                {'referenceRangeNote' in result && (
+                  <div className={`rounded-lg border p-3 text-xs mb-4 ${
+                    result.referenceRangeSource === 'uploaded-report'
+                      ? 'bg-green-50 border-green-200 text-green-800'
+                      : 'bg-orange-50 border-orange-200 text-orange-800'
+                  }`}>
+                    <strong>Reference range source:</strong>{' '}
+                    {result.referenceRangeSource === 'uploaded-report' ? 'Uploaded report' : 'General fallback'}.
+                    {' '}
+                    {result.referenceRangeNote}
+                  </div>
+                )}
                 
                 {/* Source Indicator */}
                 <SourceIndicator level={result.sourceLevel} sources={result.sources} />
