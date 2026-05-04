@@ -13,7 +13,10 @@ export async function translateText(text, targetLang) {
     body: JSON.stringify({ q: text, target: targetLang }),
   });
 
-  if (!res.ok) throw new Error(`Translation error: ${res.statusText}`);
+  if (!res.ok) {
+    const errorPayload = await res.json().catch(() => ({}));
+    throw new Error(errorPayload.error?.message || errorPayload.error || `Translation error: ${res.statusText}`);
+  }
   const data = await res.json();
   return data.data.translations[0].translatedText;
 }
@@ -30,7 +33,10 @@ export async function translateBatch(texts, targetLang) {
     body: JSON.stringify({ q: texts, target: targetLang }),
   });
 
-  if (!res.ok) throw new Error(`Translation error: ${res.statusText}`);
+  if (!res.ok) {
+    const errorPayload = await res.json().catch(() => ({}));
+    throw new Error(errorPayload.error?.message || errorPayload.error || `Translation error: ${res.statusText}`);
+  }
   const data = await res.json();
   return data.data.translations.map((t) => t.translatedText);
 }

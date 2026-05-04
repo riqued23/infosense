@@ -3,6 +3,7 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { handleLabSummaryRequest } from './api/lab-summary.js'
+import { handleTranslateRequest } from './api/translate.js'
 
 
 function figmaAssetResolver() {
@@ -28,24 +29,28 @@ function openAiLabSummaryApi(apiKey: string | undefined, model: string) {
   }
 }
 
+function googleTranslateApi(apiKey: string | undefined) {
+  return {
+    name: 'google-translate-api',
+    configureServer(server) {
+      server.middlewares.use('/api/translate', async (req, res) => {
+        await handleTranslateRequest(req, res, { apiKey })
+      })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   return {
     plugins: [
       openAiLabSummaryApi(env.OPENAI_API_KEY, env.OPENAI_MODEL || 'gpt-4.1-mini'),
+      googleTranslateApi(env.GOOGLE_TRANSLATE_API_KEY),
       figmaAssetResolver(),
       react(),
       tailwindcss(),
     ],
-    server: {
-      proxy: {
-        '/api/translate': {
-          target: 'http://localhost:3000',
-          changeOrigin: true,
-        },
-      },
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src/app'),
