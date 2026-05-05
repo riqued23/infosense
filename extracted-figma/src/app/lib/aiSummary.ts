@@ -4,7 +4,7 @@ interface LabResult {
   unit: string;
   normalMin: number;
   normalMax: number;
-  status: 'normal' | 'high' | 'low';
+  status: 'normal' | 'high' | 'low' | 'not-established';
   trendInterpretation?: string;
   referenceRangeSource?: string;
   referenceRangeNote?: string;

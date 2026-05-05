@@ -3,7 +3,8 @@ const SUMMARY_INSTRUCTIONS =
 
 const SAFETY_RULES = [
   'Use only the provided lab values and reference range source notes.',
-  'Mention when ranges are general fallback ranges rather than ranges from the report.',
+  'Do not invent or apply general fallback ranges.',
+  'If a result has referenceRangeSource "not-established", explain that no numeric reference interval was provided and do not call it normal, abnormal, high, or low.',
   'Encourage the user to verify with their clinician.',
 ];
 

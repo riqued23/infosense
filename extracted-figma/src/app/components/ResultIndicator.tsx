@@ -11,7 +11,7 @@ interface ResultIndicatorProps {
   normalMax: number;
   rangeMin: number;
   rangeMax: number;
-  status: 'normal' | 'high' | 'low';
+  status: 'normal' | 'high' | 'low' | 'not-established';
 }
 
 const RI_DEFAULTS = {
@@ -62,6 +62,7 @@ export function ResultIndicator({
     normal: { icon: <CheckCircle className="w-5 h-5" />, color: 'text-green-700', label: t.normalRange },
     high:   { icon: <TrendingUp className="w-5 h-5" />,  color: 'text-orange-700', label: t.aboveNormal },
     low:    { icon: <TrendingDown className="w-5 h-5" />, color: 'text-orange-700', label: t.belowNormal },
+    'not-established': { icon: <CheckCircle className="w-5 h-5" />, color: 'text-gray-700', label: t.yourValue },
   }[status];
 
   return (

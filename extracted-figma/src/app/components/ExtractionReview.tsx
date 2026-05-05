@@ -28,7 +28,7 @@ const REVIEW_DEFAULTS = {
   colRangeSource: 'Range Source',
   colStatus: 'Status',
   optionUploaded: 'Uploaded report',
-  optionFallback: 'General fallback',
+  optionUnavailable: 'Not established',
   emptyLabValues: 'No supported lab values were recognized. You can still review extracted text below, but summaries will be limited.',
   extractedTextTitle: 'Extracted Text',
   noTextFound: 'No selectable text was found in this PDF.',
@@ -222,20 +222,28 @@ export function ExtractionReview() {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <input
-                        type="number"
-                        value={result.normalMin}
-                        onChange={(event) => updateResult(index, { normalMin: numberOrZero(event.target.value) })}
-                        className="w-24 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                      {result.referenceRangeSource === 'not-established' ? (
+                        <span className="inline-flex w-24 px-2 py-1 text-gray-500">Not Estab.</span>
+                      ) : (
+                        <input
+                          type="number"
+                          value={result.normalMin}
+                          onChange={(event) => updateResult(index, { normalMin: numberOrZero(event.target.value) })}
+                          className="w-24 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      )}
                     </td>
                     <td className="px-4 py-3">
-                      <input
-                        type="number"
-                        value={result.normalMax}
-                        onChange={(event) => updateResult(index, { normalMax: numberOrZero(event.target.value) })}
-                        className="w-24 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                      {result.referenceRangeSource === 'not-established' ? (
+                        <span className="inline-flex w-24 px-2 py-1 text-gray-500">Not Estab.</span>
+                      ) : (
+                        <input
+                          type="number"
+                          value={result.normalMax}
+                          onChange={(event) => updateResult(index, { normalMax: numberOrZero(event.target.value) })}
+                          className="w-24 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <select
@@ -247,21 +255,23 @@ export function ExtractionReview() {
                             referenceRangeNote:
                               source === 'uploaded-report'
                                 ? 'Reference range confirmed from the uploaded report during review.'
-                                : 'Reference range was not found in the PDF, so ClearCare used a general adult fallback range. Confirm with the lab report or clinician.',
-                            sources: source === 'uploaded-report' ? ['Uploaded report'] : ['General medical references'],
+                                : 'No numeric reference interval was provided in the uploaded report. ClearCare will not assign a normal/abnormal label or show a range graph.',
+                            sources: ['Uploaded report'],
                           });
                         }}
                         className="w-40 border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="uploaded-report">{t.optionUploaded}</option>
-                        <option value="general-fallback">{t.optionFallback}</option>
+                        <option value="not-established">{t.optionUnavailable}</option>
                       </select>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex px-2 py-1 rounded-full text-xs ${
                         result.status === 'normal'
                           ? 'bg-green-50 text-green-700'
-                          : 'bg-orange-50 text-orange-700'
+                          : result.status === 'not-established'
+                            ? 'bg-gray-50 text-gray-700'
+                            : 'bg-orange-50 text-orange-700'
                       }`}>
                         {result.status}
                       </span>

@@ -22,12 +22,14 @@ const RESULT_DEFAULTS = {
   pdfReadComplete: 'PDF Read Complete',
   parserConfidence: 'Parser confidence:',
   rangesFromPdf: 'ranges from PDF',
-  fallbackRanges: 'fallback ranges',
+  unavailableRanges: 'without numeric ranges',
   aboutTitle: 'About this explanation:',
   aboutText: 'This information was created by AI to help you understand medical terms and values. It is based on general medical knowledge, not your personal health history. Always discuss your results with your doctor before making any health decisions.',
   refRangeSource: 'Reference range source:',
   uploadedRangeLabel: 'Uploaded report',
-  generalFallbackLabel: 'General fallback',
+  unavailableRangeLabel: 'Not established',
+  valueOnlyLabel: 'Value reported',
+  noRangeGraphText: 'This report does not provide a numeric reference interval for this value, so ClearCare is not assigning a normal/abnormal label or showing a range graph.',
   prepareQuestions: 'Prepare Questions',
   prepareDesc: 'Based on your results, here are some questions you might want to ask your healthcare provider:',
   addQuestion: 'Add your own question...',
@@ -273,7 +275,7 @@ export function Results() {
         testDate: uploadedReport.testDate,
         reportType: uploadedReport.reportType,
         keyFindings: uploadedReport.keyFindings,
-        abnormalResults: uploadedReport.results.filter(r => r.status !== 'normal').length,
+        abnormalResults: uploadedReport.results.filter(r => r.status === 'high' || r.status === 'low').length,
         totalResults: Math.max(uploadedReport.results.length, 1),
         criticalActions: uploadedReport.criticalActions,
         nextSteps: uploadedReport.nextSteps,
@@ -444,7 +446,7 @@ export function Results() {
                     {uploadedReport.results.filter(r => r.referenceRangeSource === 'uploaded-report').length} {t.rangesFromPdf}
                   </span>
                   <span className="inline-flex items-center px-3 py-1 rounded-full text-xs bg-gray-50 text-gray-700 border border-gray-200">
-                    {uploadedReport.results.filter(r => r.referenceRangeSource === 'general-fallback').length} {t.fallbackRanges}
+                    {uploadedReport.results.filter(r => r.referenceRangeSource === 'not-established').length} {t.unavailableRanges}
                   </span>
                 </div>
               </div>
@@ -493,16 +495,26 @@ export function Results() {
             <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg text-gray-900 mb-4">{translatedResultNames[index] || result.name}</h3>
 
-              <ResultIndicator
-                name={result.name}
-                value={result.value}
-                unit={result.unit}
-                normalMin={result.normalMin}
-                normalMax={result.normalMax}
-                rangeMin={result.rangeMin}
-                rangeMax={result.rangeMax}
-                status={result.status}
-              />
+              {result.referenceRangeSource === 'uploaded-report' ? (
+                <ResultIndicator
+                  name={result.name}
+                  value={result.value}
+                  unit={result.unit}
+                  normalMin={result.normalMin}
+                  normalMax={result.normalMax}
+                  rangeMin={result.rangeMin}
+                  rangeMax={result.rangeMax}
+                  status={result.status}
+                />
+              ) : (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-gray-700">{t.valueOnlyLabel}</span>
+                    <strong className="text-gray-900">{result.value.toLocaleString('en-US')} {result.unit}</strong>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-2">{t.noRangeGraphText}</p>
+                </div>
+              )}
 
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <div className="text-gray-600 text-sm leading-relaxed mb-4">
@@ -516,10 +528,10 @@ export function Results() {
                   <div className={`rounded-lg border p-3 text-xs mb-4 ${
                     result.referenceRangeSource === 'uploaded-report'
                       ? 'bg-green-50 border-green-200 text-green-800'
-                      : 'bg-orange-50 border-orange-200 text-orange-800'
+                      : 'bg-gray-50 border-gray-200 text-gray-800'
                   }`}>
                     <strong>{t.refRangeSource}</strong>{' '}
-                    {result.referenceRangeSource === 'uploaded-report' ? t.uploadedRangeLabel : t.generalFallbackLabel}.
+                    {result.referenceRangeSource === 'uploaded-report' ? t.uploadedRangeLabel : t.unavailableRangeLabel}.
                     {' '}
                     {translatedRefNotes[index] || (result as any).referenceRangeNote}
                   </div>
@@ -528,7 +540,7 @@ export function Results() {
                 <SourceIndicator level={result.sourceLevel} sources={result.sources} />
               </div>
 
-              {showTrends && result.trends && (
+              {showTrends && result.trends && result.referenceRangeSource === 'uploaded-report' && (
                 <div className="mt-4">
                   <TrendAnalysis
                     testName={result.name}

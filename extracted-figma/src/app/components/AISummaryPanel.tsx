@@ -3,7 +3,7 @@ import { requestAiLabSummary, type GeneratedSummary } from '../lib/aiSummary';
 import { useMemo, useState, useEffect } from 'react';
 // @ts-ignore
 import { useTranslation } from '../translation/useTranslation';
-type LabResultStatus = 'normal' | 'high' | 'low';
+type LabResultStatus = 'normal' | 'high' | 'low' | 'not-established';
 
 interface LabResult {
   name: string;
@@ -59,8 +59,9 @@ function describeAbnormalResult(result: LabResult) {
 }
 
 function generateSummary(report: ReportSummaryData, results: LabResult[], questionsToAsk: string[], version: number): GeneratedSummary {
-  const abnormalResults = results.filter((result) => result.status !== 'normal');
+  const abnormalResults = results.filter((result) => result.status === 'high' || result.status === 'low');
   const normalResults = results.filter((result) => result.status === 'normal');
+  const notEstablishedResults = results.filter((result) => result.status === 'not-established');
   const trendHighlights = results
     .filter((result) => result.trendInterpretation)
     .slice(0, 2)
@@ -101,7 +102,7 @@ function generateSummary(report: ReportSummaryData, results: LabResult[], questi
 
   return {
     headline,
-    plainLanguageSummary: `${leadIn} ${normalResults.length} are within the provided reference ranges. ${abnormalText} This summary is educational and should be reviewed with a clinician who knows the patient's history.`,
+    plainLanguageSummary: `${leadIn} ${normalResults.length} are within the provided reference ranges. ${abnormalText} ${notEstablishedResults.length > 0 ? `${notEstablishedResults.length} value${notEstablishedResults.length === 1 ? '' : 's'} did not include a numeric reference interval, so no normal or abnormal label was assigned to those values.` : ''} This summary is educational and should be reviewed with a clinician who knows the patient's history.`,
     keyTakeaways: [
       `${normalResults.length} of ${results.length} results are in the normal range.`,
       abnormalResults.length > 0
@@ -270,7 +271,7 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
               <AlertTriangle className="w-5 h-5" />
               <h3 className="text-sm">{labels.needsReview}</h3>
             </div>
-            <p className="text-2xl text-orange-900">{results.filter((result) => result.status !== 'normal').length}</p>
+            <p className="text-2xl text-orange-900">{results.filter((result) => result.status === 'high' || result.status === 'low').length}</p>
             <p className="text-xs text-orange-800">{labels.outsideRange}</p>
           </div>
 

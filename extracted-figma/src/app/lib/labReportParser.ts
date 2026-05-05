@@ -1,6 +1,6 @@
-export type LabStatus = 'normal' | 'high' | 'low';
+export type LabStatus = 'normal' | 'high' | 'low' | 'not-established';
 export type SourceLevel = 'high' | 'medium' | 'general';
-export type ReferenceRangeSource = 'uploaded-report' | 'general-fallback';
+export type ReferenceRangeSource = 'uploaded-report' | 'not-established';
 
 export interface LabTerm {
   term: string;
@@ -191,12 +191,7 @@ function detectReferenceRange(line: string, definition: LabDefinition, value: nu
     }
   }
 
-  return {
-    normalMin: definition.normalMin,
-    normalMax: definition.normalMax,
-    source: 'general-fallback' as const,
-    note: 'Reference range was not found in the PDF, so ClearCare used a general adult fallback range. Confirm with the lab report or clinician.',
-  };
+  return null;
 }
 
 export function getLabStatus(value: number, normalMin: number, normalMax: number): LabStatus {
@@ -229,7 +224,12 @@ function findResultForDefinition(text: string, definition: LabDefinition): Parse
       continue;
     }
 
-    const { normalMin, normalMax, source, note } = detectReferenceRange(line, definition, value);
+    const referenceRange = detectReferenceRange(line, definition, value);
+    if (!referenceRange) {
+      continue;
+    }
+
+    const { normalMin, normalMax, source, note } = referenceRange;
     const status = getLabStatus(value, normalMin, normalMax);
     const unit = detectUnit(line, definition.unit);
 
@@ -307,8 +307,8 @@ function detectReportType(text: string, hasStructuredResults: boolean) {
   return hasStructuredResults ? 'Uploaded Lab Report' : 'Uploaded Medical Report';
 }
 
-function buildQuestions(results: ParsedLabResult[]) {
-  const abnormalResults = results.filter((result) => result.status !== 'normal');
+export function buildLabQuestions(results: ParsedLabResult[]) {
+  const abnormalResults = results.filter((result) => result.status === 'high' || result.status === 'low');
   const questions = abnormalResults.flatMap((result) => [
     `What does my ${result.name} result mean in the context of my health history?`,
     `Should my ${result.name} be repeated or monitored over time?`,
@@ -321,18 +321,20 @@ function buildQuestions(results: ParsedLabResult[]) {
   ].slice(0, 5);
 }
 
-function getParserConfidence(results: ParsedLabResult[], warnings: string[]) {
-  if (warnings.length > 0 || results.length === 0) {
+export function getParserConfidence(results: ParsedLabResult[], warnings: string[]) {
+  const accuracyWarnings = warnings.filter((warning) => !/numeric reference interval/i.test(warning));
+
+  if (accuracyWarnings.length > 0 || results.length === 0) {
     return 'low' as const;
   }
 
-  const fallbackCount = results.filter((result) => result.referenceRangeSource === 'general-fallback').length;
+  const unavailableRangeCount = results.filter((result) => result.referenceRangeSource === 'not-established').length;
 
-  if (fallbackCount === 0) {
+  if (unavailableRangeCount === 0) {
     return 'high' as const;
   }
 
-  if (fallbackCount < results.length) {
+  if (unavailableRangeCount < results.length) {
     return 'medium' as const;
   }
 
@@ -353,25 +355,27 @@ export function refreshParsedLabResult(result: ParsedLabResult): ParsedLabResult
     normalMax,
     rangeMin,
     rangeMax,
-    status: getLabStatus(value, normalMin, normalMax),
+    status: result.referenceRangeSource === 'not-established' ? 'not-established' : getLabStatus(value, normalMin, normalMax),
     trends: result.trends.length > 0 ? [{ ...result.trends[0], value }] : [{ date: new Date().toISOString().slice(0, 10), value }],
   };
 }
 
 export function refreshParsedLabReport(report: ParsedLabReport): ParsedLabReport {
   const results = report.results.map(refreshParsedLabResult);
-  const abnormalResults = results.filter((result) => result.status !== 'normal');
-  const parserWarnings = [...report.parserWarnings.filter((warning) => !warning.includes('reference range'))];
-  const fallbackRangeCount = results.filter((result) => result.referenceRangeSource === 'general-fallback').length;
+  const abnormalResults = results.filter((result) => result.status === 'high' || result.status === 'low');
+  const parserWarnings = [
+    ...report.parserWarnings.filter((warning) => !/reference (range|interval)/i.test(warning)),
+  ];
+  const unavailableRangeCount = results.filter((result) => result.referenceRangeSource === 'not-established').length;
 
-  if (fallbackRangeCount > 0) {
-    parserWarnings.push(`${fallbackRangeCount} reference range${fallbackRangeCount === 1 ? ' was' : 's were'} not found in the PDF, so general fallback ranges are being shown.`);
+  if (unavailableRangeCount > 0) {
+    parserWarnings.push(`${unavailableRangeCount} result${unavailableRangeCount === 1 ? '' : 's'} did not include a numeric reference interval, so no normal/abnormal label or range graph is shown for those values.`);
   }
 
   return {
     ...report,
     results,
-    questionsToAsk: buildQuestions(results),
+    questionsToAsk: buildLabQuestions(results),
     keyFindings:
       results.length > 0
         ? [
@@ -394,7 +398,7 @@ export function parseLabReportText(extractedText: string, fileName?: string): Pa
   const results = labDefinitions
     .map((definition) => findResultForDefinition(cleanedText, definition))
     .filter((result): result is ParsedLabResult => Boolean(result));
-  const abnormalResults = results.filter((result) => result.status !== 'normal');
+  const abnormalResults = results.filter((result) => result.status === 'high' || result.status === 'low');
   const parserWarnings: string[] = [];
 
   if (!cleanedText) {
@@ -405,9 +409,9 @@ export function parseLabReportText(extractedText: string, fileName?: string): Pa
     parserWarnings.push('Text was extracted, but no supported lab values were recognized yet.');
   }
 
-  const fallbackRangeCount = results.filter((result) => result.referenceRangeSource === 'general-fallback').length;
-  if (fallbackRangeCount > 0) {
-    parserWarnings.push(`${fallbackRangeCount} reference range${fallbackRangeCount === 1 ? ' was' : 's were'} not found in the PDF, so general fallback ranges are being shown.`);
+  const unavailableRangeCount = results.filter((result) => result.referenceRangeSource === 'not-established').length;
+  if (unavailableRangeCount > 0) {
+    parserWarnings.push(`${unavailableRangeCount} result${unavailableRangeCount === 1 ? '' : 's'} did not include a numeric reference interval, so no normal/abnormal label or range graph is shown for those values.`);
   }
 
   return {
@@ -415,12 +419,12 @@ export function parseLabReportText(extractedText: string, fileName?: string): Pa
     testDate: detectDate(cleanedText),
     reportType: detectReportType(cleanedText, results.length > 0),
     results,
-    questionsToAsk: buildQuestions(results),
+    questionsToAsk: buildLabQuestions(results),
     keyFindings:
       results.length > 0
         ? [
             `${results.length} supported lab value${results.length === 1 ? '' : 's'} were recognized from the uploaded PDF.`,
-            `${abnormalResults.length} result${abnormalResults.length === 1 ? '' : 's'} are outside the detected or default reference range.`,
+            `${abnormalResults.length} result${abnormalResults.length === 1 ? '' : 's'} are outside the detected reference range.`,
             'Review extracted values against the original PDF before relying on this summary.',
           ]
         : ['No structured lab values were recognized from the uploaded PDF.'],

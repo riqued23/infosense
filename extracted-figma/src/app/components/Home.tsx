@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { Upload, FileText, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import { extractPdfText } from '@/lib/pdfText';
 import { parseLabReportText } from '@/lib/labReportParser';
+import { requestAiLabExtraction } from '@/lib/aiExtraction';
 import { LanguageSelector } from './LanguageSelector';
 // @ts-ignore
 import { useTranslation } from '../translation/useTranslation';
@@ -19,6 +20,7 @@ const HOME_DEFAULTS = {
   uploadedSuccess: 'File uploaded successfully',
   explainBtn: 'Explain This Report',
   readingBtn: 'Reading PDF',
+  extractingBtn: 'Extracting labs',
   uploadDiff: 'Upload Different File',
   card1Title: 'Learn More About This Test',
   card1Desc: 'Get background information on common medical tests',
@@ -33,6 +35,7 @@ export function Home() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isReadingReport, setIsReadingReport] = useState(false);
+  const [processingStep, setProcessingStep] = useState<'idle' | 'reading' | 'extracting'>('idle');
   const [uploadError, setUploadError] = useState('');
 
   const { language, translateBatch } = useTranslation();
@@ -78,11 +81,25 @@ export function Home() {
     }
 
     setIsReadingReport(true);
+    setProcessingStep('reading');
     setUploadError('');
 
     try {
       const extractedText = await extractPdfText(uploadedFile);
-      const parsedReport = parseLabReportText(extractedText, uploadedFile.name);
+      setProcessingStep('extracting');
+
+      let parsedReport;
+      try {
+        parsedReport = await requestAiLabExtraction(extractedText, uploadedFile.name);
+      } catch (aiError) {
+        parsedReport = parseLabReportText(extractedText, uploadedFile.name);
+        parsedReport.parserWarnings = [
+          `AI extraction unavailable: ${aiError instanceof Error ? aiError.message : 'Unknown error'}. ClearCare used the local parser instead.`,
+          ...parsedReport.parserWarnings,
+        ];
+        parsedReport.parserConfidence = 'low';
+      }
+
       sessionStorage.setItem('clearcareUploadedReport', JSON.stringify(parsedReport));
       navigate('/review', { state: { source: 'uploaded-pdf' } });
     } catch (error) {
@@ -90,6 +107,7 @@ export function Home() {
       setUploadError(`${message} Try a text-based PDF or export the report as a searchable PDF.`);
     } finally {
       setIsReadingReport(false);
+      setProcessingStep('idle');
     }
   };
 
@@ -163,7 +181,7 @@ export function Home() {
                   className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
                 >
                   {isReadingReport && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {isReadingReport ? t.readingBtn : t.explainBtn}
+                  {processingStep === 'extracting' ? t.extractingBtn : isReadingReport ? t.readingBtn : t.explainBtn}
                 </button>
                 <button
                   onClick={() => {
