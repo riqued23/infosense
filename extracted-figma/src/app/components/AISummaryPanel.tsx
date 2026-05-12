@@ -53,23 +53,97 @@ const UI_LABELS = {
 
 const formatValue = (result: LabResult) => `${result.value.toLocaleString('en-US')} ${result.unit}`;
 
+function explainMarkerRole(name: string) {
+  const lowerName = name.toLowerCase();
+
+  if (lowerName.includes('cd4') || lowerName.includes('cd 4')) {
+    return 'CD4 cells are immune cells. They help direct the body\'s response to germs.';
+  }
+
+  if (lowerName.includes('cd8') || lowerName.includes('cd 8')) {
+    return 'CD8 cells are immune cells. They help the body find and remove infected cells.';
+  }
+
+  if (lowerName.includes('neutrophil')) {
+    return 'Neutrophils are white blood cells. They help fight many common infections.';
+  }
+
+  if (lowerName.includes('lymph')) {
+    return 'Lymphocytes are white blood cells. They help the immune system respond to germs.';
+  }
+
+  if (lowerName.includes('mono')) {
+    return 'Monocytes are white blood cells. They help clean up germs and damaged cells.';
+  }
+
+  if (lowerName.includes('eos')) {
+    return 'Eosinophils are white blood cells. They can be linked with allergies and parasites.';
+  }
+
+  if (lowerName.includes('baso')) {
+    return 'Basophils are white blood cells. They can be involved in allergic responses.';
+  }
+
+  if (lowerName.includes('hemoglobin')) {
+    return 'Hemoglobin is part of red blood cells. It helps carry oxygen through the body.';
+  }
+
+  if (lowerName === 'wbc' || lowerName.includes('white blood')) {
+    return 'White blood cells help the body fight germs.';
+  }
+
+  if (lowerName === 'rbc' || lowerName.includes('red blood')) {
+    return 'Red blood cells carry oxygen through the body.';
+  }
+
+  if (lowerName.includes('platelet')) {
+    return 'Platelets help blood clot when you bleed.';
+  }
+
+  return `${name} is one lab value from this report. Your care team can explain how it fits your health.`;
+}
+
 function describeAbnormalResult(result: LabResult) {
-  const direction = result.status === 'low' ? 'below' : 'above';
-  return `${result.name} is ${direction} the reference range at ${formatValue(result)} (expected ${result.normalMin}-${result.normalMax} ${result.unit}).`;
+  const direction = result.status === 'low' ? 'low' : 'high';
+  return `${result.name} is ${direction}. Your result is ${formatValue(result)}. The usual range on this report is ${result.normalMin}-${result.normalMax} ${result.unit}. ${explainMarkerRole(result.name)} Ask your doctor what this means for you.`;
+}
+
+function describeAbnormalTakeaway(results: LabResult[]) {
+  if (results.length === 0) {
+    return 'No reviewed value is marked high or low.';
+  }
+
+  if (results.length === 1) {
+    const result = results[0];
+    return `One result is ${result.status}. Ask your doctor what ${result.name} means for you.`;
+  }
+
+  const highCount = results.filter((result) => result.status === 'high').length;
+  const lowCount = results.filter((result) => result.status === 'low').length;
+  const parts = [
+    highCount > 0 ? `${highCount} high` : '',
+    lowCount > 0 ? `${lowCount} low` : '',
+  ].filter(Boolean);
+
+  return `${results.length} results need review (${parts.join(', ')}). Ask your doctor what they mean together.`;
+}
+
+function describeNoRangeTakeaway(results: LabResult[]) {
+  if (results.length === 0) {
+    return 'Each reviewed value has a usual range on this report.';
+  }
+
+  return `${results.length} value${results.length === 1 ? '' : 's'} do not have a usual range on this report. ClearCare did not label them high or low.`;
 }
 
 function generateSummary(report: ReportSummaryData, results: LabResult[], questionsToAsk: string[], version: number): GeneratedSummary {
   const abnormalResults = results.filter((result) => result.status === 'high' || result.status === 'low');
   const normalResults = results.filter((result) => result.status === 'normal');
   const notEstablishedResults = results.filter((result) => result.status === 'not-established');
-  const trendHighlights = results
-    .filter((result) => result.trendInterpretation)
-    .slice(0, 2)
-    .map((result) => result.trendInterpretation as string);
   const summaryLeadIns = [
-    `${report.patientName}'s ${report.reportType} from ${report.testDate} includes ${results.length} reviewed measurements.`,
-    `This ${report.reportType} summary reviews ${results.length} lab values from ${report.testDate}.`,
-    `For ${report.patientName}'s ${report.testDate} ${report.reportType}, ${results.length} measurements were reviewed.`,
+    `${report.patientName}'s report has ${results.length} lab value${results.length === 1 ? '' : 's'} to review.`,
+    `This summary looks at ${results.length} lab value${results.length === 1 ? '' : 's'} from ${report.testDate}.`,
+    `${report.reportType} includes ${results.length} lab value${results.length === 1 ? '' : 's'} in this upload.`,
   ];
   const leadIn = summaryLeadIns[(version - 1) % summaryLeadIns.length];
 
@@ -77,46 +151,55 @@ function generateSummary(report: ReportSummaryData, results: LabResult[], questi
     return {
       headline: `${report.reportType}: no structured lab values found`,
       plainLanguageSummary:
-        'The uploaded report text was captured, but ClearCare could not identify supported lab values from it yet. This can happen with scanned PDFs, unusual formatting, or lab markers this prototype does not parse yet.',
+        'ClearCare could read the file, but it could not find clear lab values. This can happen when a PDF is scanned or the table is hard to read.',
       keyTakeaways: [
-        'No numeric lab values were recognized for summary generation.',
-        'The extracted text can still be reviewed from the original report section.',
-        'A clinician should review the original PDF directly.',
+        'No clear lab values were found.',
+        'You can still review the text from the file.',
+        'Ask your care team to review the original report.',
       ],
-      watchItems: ['Try a searchable PDF or a report that includes common CBC markers such as hemoglobin, WBC, platelets, lymphocytes, neutrophils, or MCV.'],
+      watchItems: ['Try uploading a searchable PDF if you have one.'],
       suggestedQuestions: questionsToAsk.slice(0, 3),
       confidenceNote:
-        'Generated from extracted PDF text only. No medical interpretation was made because structured values were not recognized.',
+        'This is educational and based only on text ClearCare could read from the file.',
     };
   }
 
   const abnormalText =
     abnormalResults.length === 0
-      ? 'No values are marked outside the provided reference ranges.'
+      ? 'No values are marked high or low.'
       : abnormalResults.map(describeAbnormalResult).join(' ');
+  const notEstablishedText =
+    notEstablishedResults.length > 0
+      ? `${notEstablishedResults.length} value${notEstablishedResults.length === 1 ? '' : 's'} did not have a usual range on this report. ClearCare did not label those values high or low.`
+      : '';
+  const abnormalTeachingText =
+    abnormalResults.length > 0
+      ? abnormalResults
+          .slice(0, 2)
+          .map((result) => explainMarkerRole(result.name))
+          .join(' ')
+      : '';
 
   const headline =
     abnormalResults.length === 0
       ? `${report.reportType}: all reviewed values are in range`
-      : `${report.reportType}: ${abnormalResults.length} value needs a closer look`;
+      : `${report.reportType}: ${abnormalResults.length} value${abnormalResults.length === 1 ? '' : 's'} need review`;
 
   return {
     headline,
-    plainLanguageSummary: `${leadIn} ${normalResults.length} are within the provided reference ranges. ${abnormalText} ${notEstablishedResults.length > 0 ? `${notEstablishedResults.length} value${notEstablishedResults.length === 1 ? '' : 's'} did not include a numeric reference interval, so no normal or abnormal label was assigned to those values.` : ''} This summary is educational and should be reviewed with a clinician who knows the patient's history.`,
+    plainLanguageSummary: `${leadIn} ${normalResults.length} value${normalResults.length === 1 ? '' : 's'} are within the usual range shown on the report. ${abnormalText} ${abnormalTeachingText} ${notEstablishedText} This is educational. Review it with your doctor or care team.`,
     keyTakeaways: [
-      `${normalResults.length} of ${results.length} results are in the normal range.`,
-      abnormalResults.length > 0
-        ? abnormalResults.map(describeAbnormalResult)[0]
-        : 'The report does not show a flagged high or low result in this sample.',
-      trendHighlights[0] ?? 'Trend information is limited for this report.',
+      `${normalResults.length} of ${results.length} value${results.length === 1 ? '' : 's'} are in range.`,
+      describeAbnormalTakeaway(abnormalResults),
+      describeNoRangeTakeaway(notEstablishedResults),
     ],
     watchItems:
       abnormalResults.length > 0
-        ? abnormalResults.map((result) => `Ask whether the ${result.name} result should be rechecked or monitored.`)
-        : ['Continue routine follow-up based on your clinician\'s guidance.'],
+        ? abnormalResults.map((result) => `Ask your doctor what the ${result.name} result means for you.`)
+        : ['Ask your doctor if any value needs follow-up.'],
     suggestedQuestions: questionsToAsk.slice(0, 3),
     confidenceNote:
-      'Generated from the visible lab values and reference ranges. It does not include symptoms, medications, prior diagnoses, or your clinician\'s interpretation.',
+      'This is educational and based only on the lab values shown here. It does not include symptoms, medicines, past health history, or your clinician\'s judgment.',
   };
 }
 
