@@ -1,14 +1,16 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { ArrowLeft, FileText, Info, Save, MessageCircle, AlertCircle, Image as ImageIcon, HelpCircle, Edit2, Trash2, Plus } from 'lucide-react';
+import { Activity, ArrowLeft, BookOpen, ChevronDown, ExternalLink, FileText, Info, Save, MessageCircle, AlertCircle, Image as ImageIcon, HelpCircle, Edit2, Trash2, Plus, Sparkles, Stethoscope } from 'lucide-react';
 import { ResultIndicator } from './ResultIndicator';
 import { SourceIndicator } from './SourceIndicator';
 import { TrendAnalysis } from './TrendAnalysis';
 import { MedicalTerm } from './MedicalTerm';
-import { ComprehensiveSummary } from './ComprehensiveSummary';
 import { LanguageSelector } from './LanguageSelector';
 import { AISummaryPanel } from './AISummaryPanel';
 import type { ParsedLabReport } from '@/lib/labReportParser';
+import { type GeneratedSummary } from '@/lib/aiSummary';
+import { buildLocalLabExplanation, getTrustedLabSource, type GeneratedLabExplanation } from '@/lib/labExplanations';
+import { buildLocalLabInsights, requestLabInsights, type GeneratedLabInsights } from '@/lib/labInsights';
 import exampleImage from 'figma:asset/82fbe702169bdbc28b8a30884aa28c6363cb2024.png';
 // @ts-ignore
 import { useTranslation } from '../translation/useTranslation';
@@ -20,7 +22,6 @@ const RESULT_DEFAULTS = {
   clickToView: 'Click to view',
   uploadedReportText: 'your uploaded medical report',
   pdfReadComplete: 'PDF Read Complete',
-  parserConfidence: 'Parser confidence:',
   rangesFromPdf: 'ranges from PDF',
   unavailableRanges: 'without numeric ranges',
   aboutTitle: 'About this explanation:',
@@ -30,6 +31,24 @@ const RESULT_DEFAULTS = {
   unavailableRangeLabel: 'Not established',
   valueOnlyLabel: 'Value reported',
   noRangeGraphText: 'This report does not provide a numeric reference interval for this value, so ClearCare is not assigning a normal/abnormal label or showing a range graph.',
+  labExplanationLoading: 'Building plain-language test explanations...',
+  labExplanationFallback: 'Showing plain-language explanations generated on this device.',
+  insightsLoadingTitle: 'Creating Your AI Lab Summary',
+  insightsLoadingDesc: 'ClearCare is reviewing your lab values, writing plain-language explanations, and preparing your result cards.',
+  insightsLoadingStep1: 'Reviewing your uploaded lab values',
+  insightsLoadingStep2: 'Checking high, low, and in-range results',
+  insightsLoadingStep3: 'Writing easy-to-read explanations',
+  insightsLoadingStep4: 'Preparing your personalized summary',
+  insightsLoadingActive: 'AI is working',
+  insightsLoadingNearlyDone: 'Finishing up',
+  whatItMeans: 'What It Means',
+  aboutThisTest: 'About This Test',
+  yourResult: 'Your Result',
+  wantToLearnMore: 'Want to learn more?',
+  statusNormal: 'Normal',
+  statusHigh: 'High',
+  statusLow: 'Low',
+  statusNoRange: 'No range',
   prepareQuestions: 'Prepare Questions',
   prepareDesc: 'Based on your results, here are some questions you might want to ask your healthcare provider:',
   addQuestion: 'Add your own question...',
@@ -43,6 +62,48 @@ const RESULT_DEFAULTS = {
   noResultsTitle: 'No Structured Results Found',
   noResultsDesc: 'The PDF text was captured, but this prototype could not identify supported lab values yet. You can view the extracted text above, or try a searchable CBC report with values such as hemoglobin, WBC, platelets, lymphocytes, neutrophils, or MCV.',
 };
+
+const LAB_INSIGHTS_CACHE_PREFIX = 'clearcareLabInsights:v1:';
+
+function hashCacheKey(input: string) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
+function getLabInsightsCacheKey(input: string) {
+  return `${LAB_INSIGHTS_CACHE_PREFIX}${hashCacheKey(input)}`;
+}
+
+function readCachedLabInsights(cacheKey: string): GeneratedLabInsights | null {
+  try {
+    const cached = sessionStorage.getItem(cacheKey);
+    if (!cached) return null;
+
+    const parsed = JSON.parse(cached);
+
+    if (!parsed || typeof parsed !== 'object' || !parsed.summary || !Array.isArray(parsed.explanations)) {
+      return null;
+    }
+
+    return parsed as GeneratedLabInsights;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedLabInsights(cacheKey: string, insights: GeneratedLabInsights) {
+  try {
+    sessionStorage.setItem(cacheKey, JSON.stringify(insights));
+  } catch {
+    // Browsers can reject storage in private mode or when the quota is full.
+  }
+}
 
 // ── Mock data ─────────────────────────────────────────────────────────────────
 const mockExplanation = {
@@ -281,11 +342,46 @@ export function Results() {
         nextSteps: uploadedReport.nextSteps,
       }
     : summaryData;
+  const insightReport = useMemo(() => ({
+    patientName: currentSummaryData.patientName,
+    testDate: currentSummaryData.testDate,
+    reportType: currentSummaryData.reportType,
+  }), [currentSummaryData.patientName, currentSummaryData.testDate, currentSummaryData.reportType]);
+
+  const insightResults = useMemo(
+    () => currentExplanation.results.map((result) => ({
+      name: result.name,
+      value: result.value,
+      unit: result.unit,
+      normalMin: result.normalMin,
+      normalMax: result.normalMax,
+      status: result.status,
+      referenceRangeSource: 'referenceRangeSource' in result ? result.referenceRangeSource : 'uploaded-report',
+    })),
+    [currentExplanation.results]
+  );
+
+  const insightsRequestKey = useMemo(
+    () => JSON.stringify({
+      report: insightReport,
+      results: insightResults,
+      questionsToAsk: currentExplanation.questionsToAsk,
+    }),
+    [insightReport, insightResults, currentExplanation.questionsToAsk]
+  );
+  const insightsCacheKey = useMemo(() => getLabInsightsCacheKey(insightsRequestKey), [insightsRequestKey]);
+  const localLabExplanations = useMemo(
+    () => buildLocalLabInsights(insightResults),
+    [insightResults]
+  );
+  const [labExplanations, setLabExplanations] = useState<GeneratedLabExplanation[]>(localLabExplanations);
+  const [aiSummary, setAiSummary] = useState<GeneratedSummary | null>(null);
+  const [labInsightStatus, setLabInsightStatus] = useState<'loading' | 'ready' | 'fallback'>('loading');
+  const [labInsightError, setLabInsightError] = useState('');
+  const [loadingProgress, setLoadingProgress] = useState(8);
 
   // ── Dynamic content translations ──
-  const [translatedExplanations, setTranslatedExplanations] = useState<string[]>(
-    currentExplanation.results.map(r => r.explanation || '')
-  );
+  const [translatedLabExplanations, setTranslatedLabExplanations] = useState<GeneratedLabExplanation[]>(localLabExplanations);
   const [translatedRefNotes, setTranslatedRefNotes] = useState<string[]>(
     currentExplanation.results.map(r => ('referenceRangeNote' in r ? String((r as any).referenceRangeNote || '') : ''))
   );
@@ -296,7 +392,82 @@ export function Results() {
   const [translatedBlurb, setTranslatedBlurb] = useState('');
 
   useEffect(() => {
-    const explanations = currentExplanation.results.map(r => r.explanation || '');
+    let isActive = true;
+    const cachedInsights = readCachedLabInsights(insightsCacheKey);
+
+    if (cachedInsights && cachedInsights.explanations.length === insightResults.length) {
+      setLabInsightError('');
+      setAiSummary(cachedInsights.summary);
+      setLabExplanations(cachedInsights.explanations);
+      setLabInsightStatus('ready');
+      return () => {
+        isActive = false;
+      };
+    }
+
+    setLabInsightStatus('loading');
+    setLabInsightError('');
+    setAiSummary(null);
+    setLabExplanations(localLabExplanations);
+
+    requestLabInsights(insightReport, insightResults, currentExplanation.questionsToAsk)
+      .then((insights) => {
+        if (!isActive) return;
+        writeCachedLabInsights(insightsCacheKey, insights);
+        setAiSummary(insights.summary);
+        setLabExplanations(insights.explanations);
+        setLabInsightStatus('ready');
+      })
+      .catch((error) => {
+        if (!isActive) return;
+        setLabInsightError(error instanceof Error ? error.message : 'AI insights unavailable.');
+        setAiSummary(null);
+        setLabExplanations(localLabExplanations);
+        setLabInsightStatus('fallback');
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [insightsRequestKey, insightsCacheKey, insightReport, insightResults, currentExplanation.questionsToAsk, localLabExplanations]);
+
+  useEffect(() => {
+    if (labInsightStatus !== 'loading') {
+      setLoadingProgress(100);
+      return;
+    }
+
+    setLoadingProgress(8);
+
+    const progressTimer = window.setInterval(() => {
+      setLoadingProgress((currentProgress) => {
+        if (currentProgress < 38) return currentProgress + 7;
+        if (currentProgress < 68) return currentProgress + 4;
+        if (currentProgress < 88) return currentProgress + 2;
+        return Math.min(currentProgress + 0.5, 94);
+      });
+    }, 650);
+
+    return () => window.clearInterval(progressTimer);
+  }, [labInsightStatus, insightsRequestKey]);
+
+  useEffect(() => {
+    const explanations = currentExplanation.results.map((result, index) =>
+      labExplanations[index] ?? buildLocalLabExplanation({
+        name: result.name,
+        value: result.value,
+        unit: result.unit,
+        normalMin: result.normalMin,
+        normalMax: result.normalMax,
+        status: result.status,
+        referenceRangeSource: 'referenceRangeSource' in result ? result.referenceRangeSource : 'uploaded-report',
+      })
+    );
+    const explanationFields = explanations.flatMap((explanation) => [
+      explanation.definition,
+      explanation.description,
+      explanation.resultMeaning,
+    ]);
     const refNotes = currentExplanation.results.map(r =>
       'referenceRangeNote' in r ? String((r as any).referenceRangeNote || '') : ''
     );
@@ -307,7 +478,7 @@ export function Results() {
       : '';
 
     if (language === 'en') {
-      setTranslatedExplanations(explanations);
+      setTranslatedLabExplanations(explanations);
       setTranslatedRefNotes(refNotes);
       setTranslatedResultNames(resultNames);
       setDisplayQuestions(qs);
@@ -315,19 +486,25 @@ export function Results() {
       return;
     }
 
-    const allStrings = [...explanations, ...refNotes, ...qs, ...resultNames, blurb];
+    const allStrings = [...explanationFields, ...refNotes, ...qs, ...resultNames, blurb];
     translateBatch(allStrings).then((translated: string[]) => {
-      const n = explanations.length;
+      const n = explanationFields.length;
       const m = refNotes.length;
       const q = qs.length;
       const r = resultNames.length;
-      setTranslatedExplanations(translated.slice(0, n));
+      const translatedExplanationFields = translated.slice(0, n);
+      setTranslatedLabExplanations(explanations.map((explanation, index) => ({
+        ...explanation,
+        definition: translatedExplanationFields[index * 3] || explanation.definition,
+        description: translatedExplanationFields[index * 3 + 1] || explanation.description,
+        resultMeaning: translatedExplanationFields[index * 3 + 2] || explanation.resultMeaning,
+      })));
       setTranslatedRefNotes(translated.slice(n, n + m));
       setDisplayQuestions(translated.slice(n + m, n + m + q));
       setTranslatedResultNames(translated.slice(n + m + q, n + m + q + r));
       setTranslatedBlurb(translated[n + m + q + r] || blurb);
     });
-  }, [language, uploadedReport]);
+  }, [language, uploadedReport, labExplanations]);
 
   // ── Local UI state ──
   const [showTrends, setShowTrends] = useState(false);
@@ -336,6 +513,56 @@ export function Results() {
   const [newQuestion, setNewQuestion] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState('');
+  const [expandedResultIndexes, setExpandedResultIndexes] = useState<Set<number>>(new Set());
+
+  const toggleResultCard = (index: number) => {
+    setExpandedResultIndexes((currentIndexes) => {
+      const nextIndexes = new Set(currentIndexes);
+
+      if (nextIndexes.has(index)) {
+        nextIndexes.delete(index);
+      } else {
+        nextIndexes.add(index);
+      }
+
+      return nextIndexes;
+    });
+  };
+
+  const formatResultValue = (result: typeof currentExplanation.results[number]) =>
+    `${result.value.toLocaleString('en-US')} ${result.unit}`.trim();
+
+  const getResultStatusDisplay = (result: typeof currentExplanation.results[number]) => {
+    if (result.referenceRangeSource === 'not-established' || result.status === 'not-established') {
+      return {
+        label: t.statusNoRange,
+        badgeClass: 'bg-gray-100 text-gray-700 border-gray-200',
+        accentClass: 'border-l-gray-300',
+      };
+    }
+
+    if (result.status === 'high') {
+      return {
+        label: t.statusHigh,
+        badgeClass: 'bg-red-50 text-red-700 border-red-200',
+        accentClass: 'border-l-red-500',
+      };
+    }
+
+    if (result.status === 'low') {
+      return {
+        label: t.statusLow,
+        badgeClass: 'bg-red-50 text-red-700 border-red-200',
+        accentClass: 'border-l-red-500',
+      };
+    }
+
+    return {
+      label: t.statusNormal,
+      badgeClass: 'bg-green-50 text-green-700 border-green-200',
+      accentClass: 'border-l-green-500',
+    };
+  };
 
   const renderTextWithTerms = (text: string, terms: Array<{ term: string; definition: string }>) => {
     if (!terms || terms.length === 0) return text;
@@ -360,6 +587,188 @@ export function Results() {
     });
     if (remainingText) parts.push(remainingText);
     return parts.length > 0 ? parts : text;
+  };
+
+  const renderLabExplanation = (
+    resultName: string,
+    explanation: GeneratedLabExplanation,
+    terms: Array<{ term: string; definition: string }>
+  ) => {
+    const trustedSource = getTrustedLabSource(resultName);
+    const sections = [
+      {
+        label: t.whatItMeans,
+        text: explanation.definition,
+        icon: <BookOpen className="w-4 h-4" />,
+        color: 'text-blue-700',
+        border: 'border-blue-200',
+      },
+      {
+        label: t.aboutThisTest,
+        text: explanation.description,
+        icon: <Stethoscope className="w-4 h-4" />,
+        color: 'text-teal-700',
+        border: 'border-teal-200',
+      },
+      {
+        label: t.yourResult,
+        text: explanation.resultMeaning,
+        icon: <Activity className="w-4 h-4" />,
+        color: 'text-indigo-700',
+        border: 'border-indigo-200',
+      },
+    ];
+
+    return (
+      <div className="space-y-4 mb-4">
+        {sections.map((section) => (
+          <section key={section.label} className={`border-l-4 ${section.border} pl-4`}>
+            <div className={`flex items-center gap-2 text-sm ${section.color} mb-1`}>
+              {section.icon}
+              <h4 className="font-medium">{section.label}</h4>
+            </div>
+            <p className="text-sm text-gray-700 leading-relaxed">
+              {renderTextWithTerms(section.text, terms)}
+            </p>
+          </section>
+        ))}
+        <a
+          href={trustedSource.url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 hover:bg-blue-100 transition-colors"
+        >
+          <span className="font-medium">{t.wantToLearnMore}</span>
+          <span>{trustedSource.label}</span>
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      </div>
+    );
+  };
+
+  const regenerateLabInsights = () => {
+    setLabInsightStatus('loading');
+    setLabInsightError('');
+    setAiSummary(null);
+    setLabExplanations(localLabExplanations);
+
+    requestLabInsights(insightReport, insightResults, currentExplanation.questionsToAsk)
+      .then((insights) => {
+        writeCachedLabInsights(insightsCacheKey, insights);
+        setAiSummary(insights.summary);
+        setLabExplanations(insights.explanations);
+        setLabInsightStatus('ready');
+      })
+      .catch((error) => {
+        setLabInsightError(error instanceof Error ? error.message : 'AI insights unavailable.');
+        setAiSummary(null);
+        setLabExplanations(localLabExplanations);
+        setLabInsightStatus('fallback');
+      });
+  };
+
+  const renderInsightsLoading = () => {
+    const steps = [
+      t.insightsLoadingStep1,
+      t.insightsLoadingStep2,
+      t.insightsLoadingStep3,
+      t.insightsLoadingStep4,
+    ];
+    const activeStepIndex = Math.min(Math.floor((loadingProgress / 100) * steps.length), steps.length - 1);
+
+    return (
+      <section className="fixed inset-0 z-50 bg-white text-gray-900">
+        <div className="absolute inset-0 opacity-[0.08] bg-[linear-gradient(#2563eb_1px,transparent_1px),linear-gradient(90deg,#2563eb_1px,transparent_1px)] bg-[size:36px_36px]" />
+        <div className="relative min-h-screen px-6 py-8 flex items-center justify-center">
+          <div className="w-full max-w-3xl">
+            <div className="flex items-center justify-between mb-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-700 text-white flex items-center justify-center">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <span className="text-lg text-blue-950">ClearCare</span>
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm text-blue-800">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75 animate-ping" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-600" />
+                </span>
+                {loadingProgress > 88 ? t.insightsLoadingNearlyDone : t.insightsLoadingActive}
+              </div>
+            </div>
+
+            <div className="text-center">
+              <div className="mx-auto mb-7 relative w-28 h-28">
+                <div className="absolute inset-0 rounded-full border-2 border-blue-100" />
+                <div className="absolute inset-3 rounded-full border-2 border-teal-200 animate-pulse" />
+                <div className="absolute inset-0 rounded-full border-t-4 border-t-blue-700 border-r-4 border-r-transparent border-b-4 border-b-teal-500 border-l-4 border-l-transparent animate-spin" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-700 text-white flex items-center justify-center shadow-lg">
+                    <Sparkles className="w-7 h-7" />
+                  </div>
+                </div>
+              </div>
+
+              <h2 className="text-3xl text-blue-950 mb-3">{t.insightsLoadingTitle}</h2>
+              <p className="text-base text-gray-700 leading-relaxed max-w-2xl mx-auto">
+                {t.insightsLoadingDesc}
+              </p>
+            </div>
+
+            <div className="mt-10">
+              <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+                <span>{steps[activeStepIndex]}</span>
+                <span>{Math.round(loadingProgress)}%</span>
+              </div>
+              <div className="h-3 rounded-full bg-gray-100 border border-gray-200 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-blue-700 transition-all duration-700 ease-out"
+                  style={{ width: `${loadingProgress}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="mt-8 grid sm:grid-cols-4 gap-3">
+              {steps.map((step, index) => {
+                const isComplete = index < activeStepIndex;
+                const isActive = index === activeStepIndex;
+
+                return (
+                  <div
+                    key={step}
+                    className={`rounded-lg border px-3 py-4 min-h-28 ${
+                      isActive
+                        ? 'border-blue-300 bg-blue-50 text-blue-950 shadow-sm'
+                        : isComplete
+                          ? 'border-green-200 bg-green-50 text-green-900'
+                          : 'border-gray-200 bg-white text-gray-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm ${
+                        isComplete
+                          ? 'bg-green-600 text-white'
+                          : isActive
+                            ? 'bg-blue-700 text-white'
+                            : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {isComplete ? '✓' : index + 1}
+                      </span>
+                      {isActive && <Activity className="w-4 h-4 text-blue-700 animate-pulse" />}
+                    </div>
+                    <p className="text-sm leading-snug">{step}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <p className="mt-8 text-center text-xs text-gray-500">
+              This usually takes a few seconds. Longer reports can take a little more time.
+            </p>
+          </div>
+        </div>
+      </section>
+    );
   };
 
   return (
@@ -435,13 +844,6 @@ export function Results() {
                   {translatedBlurb || `ClearCare extracted text from ${uploadedReport.fileName} and recognized ${uploadedReport.results.length} supported lab value${uploadedReport.results.length === 1 ? '' : 's'}.`}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs border ${
-                    uploadedReport.parserConfidence === 'high' ? 'bg-green-50 text-green-800 border-green-200'
-                      : uploadedReport.parserConfidence === 'medium' ? 'bg-blue-50 text-blue-800 border-blue-200'
-                      : 'bg-orange-50 text-orange-800 border-orange-200'
-                  }`}>
-                    {t.parserConfidence} {uploadedReport.parserConfidence}
-                  </span>
                   <span className="inline-flex items-center px-3 py-1 rounded-full text-xs bg-gray-50 text-gray-700 border border-gray-200">
                     {uploadedReport.results.filter(r => r.referenceRangeSource === 'uploaded-report').length} {t.rangesFromPdf}
                   </span>
@@ -469,92 +871,146 @@ export function Results() {
           </div>
         </div>
 
-        {/* AI Summary */}
-        <div className="mb-6">
-          <AISummaryPanel
-            report={currentSummaryData}
-            results={currentExplanation.results}
-            questionsToAsk={questions}
-          />
-        </div>
+        {labInsightStatus === 'loading' ? (
+          renderInsightsLoading()
+        ) : (
+          <>
+            {/* AI Summary */}
+            <div className="mb-6">
+              <AISummaryPanel
+                report={currentSummaryData}
+                results={currentExplanation.results}
+                questionsToAsk={questions}
+                aiSummary={aiSummary}
+                aiStatus={labInsightStatus}
+                aiError={labInsightError}
+                isGenerating={labInsightStatus === 'loading'}
+                onRegenerate={regenerateLabInsights}
+              />
+            </div>
 
-        {/* Comprehensive Summary */}
-        <div className="mb-6">
-          <ComprehensiveSummary data={currentSummaryData} />
-        </div>
-
-        {/* Detailed result cards */}
-        <div className="space-y-4 mb-8">
+            {/* Detailed result cards */}
+            <div className="space-y-4 mb-8">
+              {currentExplanation.results.length > 0 && labInsightStatus !== 'ready' && (
+            <div className={`rounded-lg border p-3 text-xs ${
+              labInsightStatus === 'loading'
+                ? 'bg-blue-50 border-blue-200 text-blue-900'
+                : 'bg-orange-50 border-orange-200 text-orange-900'
+            }`}>
+              {labInsightStatus === 'loading' ? t.labExplanationLoading : t.labExplanationFallback}
+            </div>
+          )}
           {currentExplanation.results.length === 0 && (
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg text-gray-900 mb-2">{t.noResultsTitle}</h3>
               <p className="text-sm text-gray-700 leading-relaxed">{t.noResultsDesc}</p>
             </div>
           )}
-          {currentExplanation.results.map((result, index) => (
-            <div key={index} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <h3 className="text-lg text-gray-900 mb-4">{translatedResultNames[index] || result.name}</h3>
+          {currentExplanation.results.map((result, index) => {
+            const isExpanded = expandedResultIndexes.has(index);
+            const statusDisplay = getResultStatusDisplay(result);
 
-              {result.referenceRangeSource === 'uploaded-report' ? (
-                <ResultIndicator
-                  name={result.name}
-                  value={result.value}
-                  unit={result.unit}
-                  normalMin={result.normalMin}
-                  normalMax={result.normalMax}
-                  rangeMin={result.rangeMin}
-                  rangeMax={result.rangeMax}
-                  status={result.status}
-                />
-              ) : (
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-gray-700">{t.valueOnlyLabel}</span>
-                    <strong className="text-gray-900">{result.value.toLocaleString('en-US')} {result.unit}</strong>
+            return (
+              <div
+                key={index}
+                className={`bg-white rounded-lg shadow-sm border border-gray-200 border-l-4 ${statusDisplay.accentClass} overflow-hidden transition-shadow hover:shadow-md`}
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleResultCard(index)}
+                  aria-expanded={isExpanded}
+                  className="w-full px-5 py-4 text-left flex items-center justify-between gap-4"
+                >
+                  <div className="min-w-0">
+                    <h3 className="text-lg text-gray-900 truncate">{translatedResultNames[index] || result.name}</h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {t.valueOnlyLabel}: <span className="text-gray-800">{formatResultValue(result)}</span>
+                    </p>
                   </div>
-                  <p className="text-xs text-gray-600 mt-2">{t.noRangeGraphText}</p>
-                </div>
-              )}
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${statusDisplay.badgeClass}`}>
+                      {statusDisplay.label}
+                    </span>
+                    <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                  </div>
+                </button>
 
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <div className="text-gray-600 text-sm leading-relaxed mb-4">
-                  {renderTextWithTerms(
-                    translatedExplanations[index] || result.explanation,
-                    result.terms
-                  )}
-                </div>
+                {isExpanded && (
+                  <div className="px-5 pb-5">
+                    <div className="pt-2">
+                      {result.referenceRangeSource === 'uploaded-report' ? (
+                        <ResultIndicator
+                          name={result.name}
+                          value={result.value}
+                          unit={result.unit}
+                          normalMin={result.normalMin}
+                          normalMax={result.normalMax}
+                          rangeMin={result.rangeMin}
+                          rangeMax={result.rangeMax}
+                          status={result.status}
+                        />
+                      ) : (
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-gray-700">{t.valueOnlyLabel}</span>
+                            <strong className="text-gray-900">{formatResultValue(result)}</strong>
+                          </div>
+                          <p className="text-xs text-gray-600 mt-2">{t.noRangeGraphText}</p>
+                        </div>
+                      )}
 
-                {'referenceRangeNote' in result && (
-                  <div className={`rounded-lg border p-3 text-xs mb-4 ${
-                    result.referenceRangeSource === 'uploaded-report'
-                      ? 'bg-green-50 border-green-200 text-green-800'
-                      : 'bg-gray-50 border-gray-200 text-gray-800'
-                  }`}>
-                    <strong>{t.refRangeSource}</strong>{' '}
-                    {result.referenceRangeSource === 'uploaded-report' ? t.uploadedRangeLabel : t.unavailableRangeLabel}.
-                    {' '}
-                    {translatedRefNotes[index] || (result as any).referenceRangeNote}
+                      <div className="mt-4 pt-4 border-t border-gray-200">
+                        {renderLabExplanation(
+                          result.name,
+                          translatedLabExplanations[index] ?? buildLocalLabExplanation({
+                            name: result.name,
+                            value: result.value,
+                            unit: result.unit,
+                            normalMin: result.normalMin,
+                            normalMax: result.normalMax,
+                            status: result.status,
+                            referenceRangeSource: 'referenceRangeSource' in result ? result.referenceRangeSource : 'uploaded-report',
+                          }),
+                          result.terms
+                        )}
+
+                        {'referenceRangeNote' in result && (
+                          <div className={`rounded-lg border p-3 text-xs mb-4 ${
+                            result.referenceRangeSource === 'uploaded-report'
+                              ? 'bg-green-50 border-green-200 text-green-800'
+                              : 'bg-gray-50 border-gray-200 text-gray-800'
+                          }`}>
+                            <strong>{t.refRangeSource}</strong>{' '}
+                            {result.referenceRangeSource === 'uploaded-report' ? t.uploadedRangeLabel : t.unavailableRangeLabel}.
+                            {' '}
+                            {translatedRefNotes[index] || (result as any).referenceRangeNote}
+                          </div>
+                        )}
+
+                        <SourceIndicator level={result.sourceLevel} sources={result.sources} />
+                      </div>
+
+                      {showTrends && result.trends && result.referenceRangeSource === 'uploaded-report' && (
+                        <div className="mt-4">
+                          <TrendAnalysis
+                            testName={result.name}
+                            unit={result.unit}
+                            normalMin={result.normalMin}
+                            normalMax={result.normalMax}
+                            trends={result.trends}
+                            interpretation={result.trendInterpretation}
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
-
-                <SourceIndicator level={result.sourceLevel} sources={result.sources} />
               </div>
-
-              {showTrends && result.trends && result.referenceRangeSource === 'uploaded-report' && (
-                <div className="mt-4">
-                  <TrendAnalysis
-                    testName={result.name}
-                    unit={result.unit}
-                    normalMin={result.normalMin}
-                    normalMax={result.normalMax}
-                    trends={result.trends}
-                    interpretation={result.trendInterpretation}
-                  />
-                </div>
-              )}
+            );
+          })}
             </div>
-          ))}
-        </div>
+          </>
+        )}
 
         {/* Prepare Questions */}
         <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-6 mb-6">

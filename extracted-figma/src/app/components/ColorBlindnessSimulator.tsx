@@ -98,7 +98,7 @@ interface Props {
 export function ColorBlindnessSimulator({ children }: Props) {
   const [activeId, setActiveId] = useState('none');
   const [isOpen, setIsOpen] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(true);
 
   const activeMode = MODES.find((m) => m.id === activeId)!;
 

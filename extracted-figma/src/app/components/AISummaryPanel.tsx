@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, ClipboardList, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
-import { requestAiLabSummary, type GeneratedSummary } from '../lib/aiSummary';
+import { type GeneratedSummary } from '../lib/aiSummary';
 import { useMemo, useState, useEffect } from 'react';
 // @ts-ignore
 import { useTranslation } from '../translation/useTranslation';
@@ -25,17 +25,20 @@ interface AISummaryPanelProps {
   report: ReportSummaryData;
   results: LabResult[];
   questionsToAsk: string[];
+  aiSummary?: GeneratedSummary | null;
+  aiStatus?: 'loading' | 'ready' | 'fallback';
+  aiError?: string;
+  isGenerating?: boolean;
+  onRegenerate?: () => void;
 }
 
 const UI_LABELS = {
   panelTitle: 'AI Lab Summary',
-  statusLocalPreview: 'Local preview',
   statusGenerating: 'Generating...',
   statusAiGenerated: 'OpenAI-generated',
   statusLocalFallback: 'Local fallback',
   btnGenerating: 'Generating',
   btnRegenerate: 'Regenerate',
-  btnGenerate: 'Generate AI',
   inRange: 'In Range',
   ofReviewed: 'of',
   reviewedResults: 'reviewed results',
@@ -46,7 +49,6 @@ const UI_LABELS = {
   keyTakeaways: 'Key Takeaways',
   watchItems: 'Watch Items',
   questionsHeader: 'Questions to Ask Your Doctor',
-  localPreviewNotice: 'This is a local preview. Press Generate AI to send the reviewed lab values to OpenAI for a plain-language summary.',
   aiUnavailablePrefix: 'AI summary unavailable:',
   aiUnavailableSuffix: 'Showing the local rule-based summary instead.',
 };
@@ -203,12 +205,17 @@ function generateSummary(report: ReportSummaryData, results: LabResult[], questi
   };
 }
 
-export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPanelProps) {
+export function AISummaryPanel({
+  report,
+  results,
+  questionsToAsk,
+  aiSummary,
+  aiStatus = 'fallback',
+  aiError = '',
+  isGenerating = false,
+  onRegenerate,
+}: AISummaryPanelProps) {
   const [summaryVersion, setSummaryVersion] = useState(1);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [aiSummary, setAiSummary] = useState<GeneratedSummary | null>(null);
-  const [aiStatus, setAiStatus] = useState<'idle' | 'loading' | 'ready' | 'fallback'>('idle');
-  const [aiError, setAiError] = useState('');
   const { language, translateBatch } = useTranslation() as {
     language: string;
     translateBatch: (texts: string[]) => Promise<string[]>;
@@ -218,26 +225,6 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
     [questionsToAsk, report, results, summaryVersion]
   );
   const summary = aiSummary ?? localSummary;
-
-  const loadAiSummary = async () => {
-    setIsGenerating(true);
-    setAiStatus('loading');
-    setAiError('');
-    setAiSummary(null);
-
-    try {
-      const nextSummary = await requestAiLabSummary(report, results, questionsToAsk);
-
-      setAiSummary(nextSummary);
-      setAiStatus('ready');
-    } catch (error) {
-      setAiSummary(null);
-      setAiStatus('fallback');
-      setAiError(error instanceof Error ? error.message : 'AI summary unavailable.');
-    } finally {
-      setIsGenerating(false);
-    }
-  };
 
   const [labels, setLabels] = useState(UI_LABELS);
   const [translatedSummary, setTranslatedSummary] = useState<GeneratedSummary | null>(null);
@@ -290,7 +277,7 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
 
   const handleRegenerate = () => {
     setSummaryVersion((version) => version + 1);
-    loadAiSummary();
+    onRegenerate?.();
   };
 
   return (
@@ -304,7 +291,6 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
             <div>
               <p className="text-sm text-blue-100 mb-1">
                 {labels.panelTitle}
-                {aiStatus === 'idle' && <span className="ml-2 text-blue-200">{labels.statusLocalPreview}</span>}
                 {aiStatus === 'loading' && <span className="ml-2 text-blue-200">{labels.statusGenerating}</span>}
                 {aiStatus === 'ready' && <span className="ml-2 text-green-100">{labels.statusAiGenerated}</span>}
                 {aiStatus === 'fallback' && <span className="ml-2 text-orange-100">{labels.statusLocalFallback}</span>}
@@ -314,24 +300,18 @@ export function AISummaryPanel({ report, results, questionsToAsk }: AISummaryPan
           </div>
           <button
             type="button"
-            onClick={aiStatus === 'ready' ? handleRegenerate : loadAiSummary}
+            onClick={handleRegenerate}
             disabled={isGenerating || isTranslating}
             className="inline-flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 disabled:opacity-70 text-white px-4 py-2 rounded-lg transition-colors text-sm"
           >
             <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
-            {isGenerating ? labels.btnGenerating : aiStatus === 'ready' ? labels.btnRegenerate : labels.btnGenerate}
+            {isGenerating ? labels.btnGenerating : labels.btnRegenerate}
           </button>
         </div>
       </div>
 
       <div className="p-6 space-y-5">
         <p className="text-gray-700 leading-relaxed">{displaySummary.plainLanguageSummary}</p>
-
-        {aiStatus === 'idle' && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900">
-            {labels.localPreviewNotice}
-          </div>
-        )}
 
         {aiStatus === 'fallback' && aiError && (
           <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-xs text-orange-800">

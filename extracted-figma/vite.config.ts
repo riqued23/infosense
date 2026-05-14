@@ -3,6 +3,7 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { handleExtractLabsRequest } from './api/extract-labs.js'
+import { handleLabInsightsRequest } from './api/lab-insights.js'
 import { handleLabSummaryRequest } from './api/lab-summary.js'
 import { handleTranslateRequest } from './api/translate.js'
 
@@ -19,7 +20,7 @@ function figmaAssetResolver() {
   }
 }
 
-function openAiLabSummaryApi(apiKey: string | undefined, model: string) {
+function openAiLabSummaryApi(apiKey: string | undefined, model: string, insightsModel: string) {
   return {
     name: 'openai-lab-summary-api',
     configureServer(server) {
@@ -28,6 +29,9 @@ function openAiLabSummaryApi(apiKey: string | undefined, model: string) {
       })
       server.middlewares.use('/api/lab-summary', async (req, res) => {
         await handleLabSummaryRequest(req, res, { apiKey, model })
+      })
+      server.middlewares.use('/api/lab-insights', async (req, res) => {
+        await handleLabInsightsRequest(req, res, { apiKey, model: insightsModel })
       })
     },
   }
@@ -49,7 +53,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
-      openAiLabSummaryApi(env.OPENAI_API_KEY, env.OPENAI_MODEL || 'gpt-4.1-mini'),
+      openAiLabSummaryApi(
+        env.OPENAI_API_KEY,
+        env.OPENAI_MODEL || 'gpt-4.1-mini',
+        env.OPENAI_INSIGHTS_MODEL || 'gpt-4.1-nano',
+      ),
       googleTranslateApi(env.GOOGLE_TRANSLATE_API_KEY),
       figmaAssetResolver(),
       react(),
